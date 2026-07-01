@@ -1,7 +1,9 @@
 package com.rk.exec
 
 import java.io.BufferedReader
+import java.io.InputStream
 import java.io.InputStreamReader
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -9,14 +11,19 @@ import kotlinx.coroutines.withContext
 object ShellUtils {
     data class Result(val exitCode: Int, val output: String, val error: String, val timedOut: Boolean)
 
-    private const val BUFFER_SIZE = 8192
+    private const val BUFFER_SIZE = 4096
+    private const val STREAM_TIMEOUT_MS = 3000L
+
+    private val streamPool = Executors.newCachedThreadPool { r ->
+        Thread(r, "shell-stream").apply { isDaemon = true }
+    }
 
     suspend fun run(vararg command: String, timeoutSeconds: Long? = null): Result =
         withContext(Dispatchers.IO) {
             val process = ProcessBuilder(*command)
                 .redirectErrorStream(false)
                 .start()
-            executeAndRead(process, timeoutSeconds)
+            readProcess(process, timeoutSeconds)
         }
 
     suspend fun runUbuntu(
@@ -27,7 +34,7 @@ object ShellUtils {
     ): Result =
         withContext(Dispatchers.IO) {
             val process = ubuntuProcess(workingDir = workingDir, command = command.toList(), extraEnv = extraEnv)
-            executeAndRead(process, timeoutSeconds)
+            readProcess(process, timeoutSeconds)
         }
 
     suspend fun runUbuntuStreaming(
@@ -40,45 +47,20 @@ object ShellUtils {
     ): Result =
         withContext(Dispatchers.IO) {
             val process = ubuntuProcess(workingDir = workingDir, command = command.toList(), extraEnv = extraEnv)
-            val output = StringBuilder(1024)
-            val error = StringBuilder(512)
+            val output = StringBuilder(512)
+            val error = StringBuilder(256)
 
-            val outputThread = Thread(null, {
-                runCatching {
-                    BufferedReader(InputStreamReader(process.inputStream), BUFFER_SIZE).use { reader ->
-                        reader.forEachLine { line ->
-                            output.appendLine(line)
-                            onStdout(line)
-                        }
-                    }
-                }
-            }, "shell-stdout").apply { isDaemon = true }
-            val errorThread = Thread(null, {
-                runCatching {
-                    BufferedReader(InputStreamReader(process.errorStream), BUFFER_SIZE).use { reader ->
-                        reader.forEachLine { line ->
-                            error.appendLine(line)
-                            onStderr(line)
-                        }
-                    }
-                }
-            }, "shell-stderr").apply { isDaemon = true }
+            val outputFuture = streamPool.submit {
+                readStreamLines(process.inputStream, output, onStdout)
+            }
+            val errorFuture = streamPool.submit {
+                readStreamLines(process.errorStream, error, onStderr)
+            }
 
-            outputThread.start()
-            errorThread.start()
+            val timedOut = waitForProcess(process, timeoutSeconds)
 
-            val timedOut =
-                if (timeoutSeconds != null) {
-                    !process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
-                } else {
-                    process.waitFor()
-                    false
-                }
-
-            if (timedOut) process.destroyForcibly()
-
-            outputThread.join(2000)
-            errorThread.join(2000)
+            outputFuture.get(STREAM_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            errorFuture.get(STREAM_TIMEOUT_MS, TimeUnit.MILLISECONDS)
 
             Result(
                 exitCode = if (timedOut) -1 else runCatching { process.exitValue() }.getOrDefault(-1),
@@ -88,72 +70,64 @@ object ShellUtils {
             )
         }
 
-    private suspend fun executeAndRead(process: Process, timeoutSeconds: Long?): Result =
-        withContext(Dispatchers.IO) {
-            val stdout = StringBuilder(1024)
-            val stderr = StringBuilder(512)
+    private fun readProcess(process: Process, timeoutSeconds: Long?): Result {
+        val output = StringBuilder(512)
+        val error = StringBuilder(256)
 
-            val outputThread = Thread(null, {
-                runCatching {
-                    BufferedReader(InputStreamReader(process.inputStream), BUFFER_SIZE).use { reader ->
-                        val buf = CharArray(BUFFER_SIZE)
-                        var read: Int
-                        while (reader.read(buf).also { read = it } != -1) {
-                            stdout.append(buf, 0, read)
-                        }
-                    }
-                }
-            }, "shell-stdout").apply { isDaemon = true }
-
-            val errorThread = Thread(null, {
-                runCatching {
-                    BufferedReader(InputStreamReader(process.errorStream), BUFFER_SIZE).use { reader ->
-                        val buf = CharArray(BUFFER_SIZE)
-                        var read: Int
-                        while (reader.read(buf).also { read = it } != -1) {
-                            stderr.append(buf, 0, read)
-                        }
-                    }
-                }
-            }, "shell-stderr").apply { isDaemon = true }
-
-            outputThread.start()
-            errorThread.start()
-
-            val timedOut = try {
-                if (timeoutSeconds != null) {
-                    !process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
-                } else {
-                    process.waitFor()
-                    false
-                }
-            } catch (_: InterruptedException) {
-                true
-            }
-
-            if (timedOut) process.destroyForcibly()
-
-            outputThread.join(2000)
-            errorThread.join(2000)
-
-            Result(
-                exitCode = if (timedOut) -1 else runCatching { process.exitValue() }.getOrDefault(-1),
-                output = stdout.trimEnd().toString(),
-                error = stderr.trimEnd().toString(),
-                timedOut = timedOut,
-            )
+        val outputFuture = streamPool.submit {
+            readStream(process.inputStream, output)
+        }
+        val errorFuture = streamPool.submit {
+            readStream(process.errorStream, error)
         }
 
-    // Note: readStream is kept for backward compatibility but executeAndRead now inlines the logic
-    // with runCatching for cleaner thread-safe exception handling.
-    private fun readStream(stream: java.io.InputStream, sb: StringBuilder) {
-        runCatching {
+        val timedOut = waitForProcess(process, timeoutSeconds)
+
+        outputFuture.get(STREAM_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        errorFuture.get(STREAM_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+
+        return Result(
+            exitCode = if (timedOut) -1 else runCatching { process.exitValue() }.getOrDefault(-1),
+            output = output.trimEnd().toString(),
+            error = error.trimEnd().toString(),
+            timedOut = timedOut,
+        )
+    }
+
+    private fun waitForProcess(process: Process, timeoutSeconds: Long?): Boolean {
+        return try {
+            if (timeoutSeconds != null) {
+                !process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+            } else {
+                process.waitFor()
+                false
+            }
+        } catch (_: InterruptedException) {
+            process.destroyForcibly()
+            true
+        }
+    }
+
+    private fun readStream(stream: InputStream, sb: StringBuilder) {
+        stream.buffered(BUFFER_SIZE).reader().use { reader ->
             val buf = CharArray(BUFFER_SIZE)
-            BufferedReader(InputStreamReader(stream), BUFFER_SIZE).use { reader ->
-                var read: Int
-                while (reader.read(buf).also { read = it } != -1) {
-                    sb.append(buf, 0, read)
-                }
+            var read: Int
+            while (reader.read(buf).also { read = it } != -1) {
+                sb.append(buf, 0, read)
+            }
+        }
+    }
+
+    private fun readStreamLines(
+        stream: InputStream,
+        sb: StringBuilder,
+        onLine: (String) -> Unit,
+    ) {
+        BufferedReader(InputStreamReader(stream), BUFFER_SIZE).use { reader ->
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                sb.appendLine(line)
+                onLine(line!!)
             }
         }
     }

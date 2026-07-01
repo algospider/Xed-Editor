@@ -41,6 +41,8 @@ class Editor : CodeEditor {
     var insertFinalNewline = false
     var trimTrailingWhitespace = false
 
+    private var cachedScaledDensity = 0f
+
     data class PatchArgs(
         val isDarkMode: Boolean,
         val editorSurface: Int,
@@ -57,10 +59,11 @@ class Editor : CodeEditor {
     )
 
     init {
+        cachedScaledDensity = resources.displayMetrics.scaledDensity
         applyFont()
         applySettings()
 
-        getComponent(EditorAutoCompletion::class.java).setEnabledAnimation(true)
+        getComponent(EditorAutoCompletion::class.java).setEnabledAnimation(false)
     }
 
     fun setThemeColors(isDarkMode: Boolean, selectionColors: TextSelectionColors, colorScheme: ColorScheme) {
@@ -124,9 +127,8 @@ class Editor : CodeEditor {
                 errorColor,
             )
 
-        XedColorScheme.applyPatchesTo(colorScheme, patchArgs) // pre-apply patches
+        XedColorScheme.applyPatchesTo(colorScheme, patchArgs)
         scope.launch {
-            // TextMate color scheme with patches
             val createdColorScheme = ThemeManager.createColorScheme(context, patchArgs)
             withContext(Dispatchers.Main) { colorScheme = createdColorScheme }
         }
@@ -138,53 +140,37 @@ class Editor : CodeEditor {
     }
 
     fun applySettings() {
-        val tabSize = Settings.tab_size
-        val pinLineNumber = Settings.pin_line_number
-        val stickyScroll = Settings.sticky_scroll
-        val fastDelete = Settings.quick_deletion
         val showLineNumber = Settings.show_line_numbers
-        val cursorAnimation = Settings.cursor_animation
-        val textSize = Settings.editor_text_size
-        val wordWrap = Settings.word_wrap
-        val keyboardSuggestion = Settings.show_suggestions
-        val lineSpacing = Settings.line_spacing
-        val renderWhitespace = Settings.render_whitespace
-        val hideSoftKbd = Settings.hide_soft_keyboard_if_hardware
-        val lineEndingSetting = Settings.line_ending
-        val finalNewline = Settings.insert_final_newline
-        val trailingWhitespace = Settings.trim_trailing_whitespace
-        val completeOnEnter = Settings.complete_on_enter
-        val autoClosingBracket = Settings.auto_closing_bracket
-        val showMinimap = Settings.show_minimap
+        val pinLineNumber = Settings.pin_line_number
 
-        props.deleteMultiSpaces = tabSize
-        tabWidth = tabSize
-        props.deleteEmptyLineFast = fastDelete
-        props.stickyScroll = stickyScroll
+        props.deleteMultiSpaces = Settings.tab_size
+        tabWidth = Settings.tab_size
+        props.deleteEmptyLineFast = Settings.quick_deletion
+        props.stickyScroll = Settings.sticky_scroll
         props.useICULibToSelectWords = true
-        props.selectCompletionItemOnEnterForSoftKbd = completeOnEnter
-        props.symbolPairAutoCompletion = autoClosingBracket
-        props.showMinimap = showMinimap
+        props.selectCompletionItemOnEnterForSoftKbd = Settings.complete_on_enter
+        props.symbolPairAutoCompletion = Settings.auto_closing_bracket
+        props.showMinimap = Settings.show_minimap
         setPinLineNumber(pinLineNumber)
         isLineNumberEnabled = showLineNumber
-        isCursorAnimationEnabled = cursorAnimation
-        setTextSize(textSize.toFloat())
-        setWordwrap(wordWrap, true, true)
-        lineSpacingMultiplier = lineSpacing
-        isDisableSoftKbdIfHardKbdAvailable = hideSoftKbd
-        showSuggestions(keyboardSuggestion)
+        isCursorAnimationEnabled = Settings.cursor_animation
+        setTextSize(Settings.editor_text_size.toFloat())
+        setWordwrap(Settings.word_wrap, true, true)
+        lineSpacingMultiplier = Settings.line_spacing
+        isDisableSoftKbdIfHardKbdAvailable = Settings.hide_soft_keyboard_if_hardware
+        showSuggestions(Settings.show_suggestions)
 
-        LineEnding.fromValue(lineEndingSetting)?.let { lineEnding = it }
+        LineEnding.fromValue(Settings.line_ending)?.let { lineEnding = it }
         lineSeparator = lineEnding.type
-        insertFinalNewline = finalNewline
-        trimTrailingWhitespace = trailingWhitespace
+        insertFinalNewline = Settings.insert_final_newline
+        trimTrailingWhitespace = Settings.trim_trailing_whitespace
 
-        val minScaleSize: Float = 6f * resources.displayMetrics.scaledDensity
-        val maxScaleSize: Float = 100f * resources.displayMetrics.scaledDensity
+        val minScaleSize: Float = 6f * cachedScaledDensity
+        val maxScaleSize: Float = 100f * cachedScaledDensity
         setScaleTextSizes(minScaleSize, maxScaleSize)
 
         nonPrintablePaintingFlags =
-            if (renderWhitespace) {
+            if (Settings.render_whitespace) {
                 FLAG_DRAW_LINE_SEPARATOR or
                     FLAG_DRAW_WHITESPACE_LEADING or
                     FLAG_DRAW_WHITESPACE_INNER or
@@ -267,29 +253,14 @@ class Editor : CodeEditor {
         withContext(Dispatchers.Main) { setEditorLanguage(language) }
     }
 
-    /**
-     * Register an action button in the text action window.
-     *
-     * @param item The text action item instance to register.
-     */
     fun registerTextAction(item: TextActionItem) {
         textActionWindow.registerTextAction(item)
     }
 
-    /**
-     * Unregister an action button in the text action window.
-     *
-     * @param item The text action item instance to unregister.
-     */
     fun unregisterTextAction(item: TextActionItem) {
         textActionWindow.unregisterTextAction(item)
     }
 
-    /**
-     * Retrieves the currently selected text in the editor.
-     *
-     * @return The selected text or `null` if no text is currently selected.
-     */
     fun getSelectedText(): String? {
         if (!isTextSelected) return null
 
@@ -311,12 +282,9 @@ class Editor : CodeEditor {
             )
     }
 
-    /**
-     * Overrides the default word range detection to prioritize identifying URIs at the given position before falling
-     * back to standard word boundaries.
-     */
     override fun getWordRange(line: Int, column: Int, useIcu: Boolean): TextRange? {
-        val urls = uriRegex.findAll(text.getLine(line))
+        val textLine = text.getLine(line)
+        val urls = uriRegex.findAll(textLine)
         val foundUrl = urls.find { column in it.range.first..it.range.last }
         if (foundUrl != null) {
             return TextRange(CharPosition(line, foundUrl.range.first), CharPosition(line, foundUrl.range.last + 1))
@@ -325,11 +293,6 @@ class Editor : CodeEditor {
         return super.getWordRange(line, column, useIcu)
     }
 
-    /**
-     * Returns whether a URL is selected in the editor.
-     *
-     * @return True if a valid URL is selected, false otherwise.
-     */
     fun isUrlSelected(): Boolean {
         val text = getSelectedText() ?: return false
         return urlRegex.matches(text)

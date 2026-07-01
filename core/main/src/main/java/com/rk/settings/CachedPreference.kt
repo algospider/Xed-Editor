@@ -1,15 +1,15 @@
 package com.rk.settings
 
-import android.os.Handler
-import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
 class CachedPreference<T>(val key: String, val defaultValue: T) : ReadWriteProperty<Any?, T> {
-    private var state by mutableStateOf(loadInitialValue())
+    private val atomicState = AtomicReference(loadInitialValue())
+    private var state by mutableStateOf(atomicState.get())
 
     init {
         Preference.registerDelegate(key, this)
@@ -30,6 +30,8 @@ class CachedPreference<T>(val key: String, val defaultValue: T) : ReadWritePrope
     override fun getValue(thisRef: Any?, property: KProperty<*>): T = state
 
     override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
+        atomicState.set(value)
+        state = value
         when (value) {
             is Boolean -> Preference.setBoolean(key, value)
             is String -> Preference.setString(key, value)
@@ -41,10 +43,7 @@ class CachedPreference<T>(val key: String, val defaultValue: T) : ReadWritePrope
     }
 
     internal fun applyStateValue(value: T) {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            state = value
-        } else {
-            Handler(Looper.getMainLooper()).post { state = value }
-        }
+        atomicState.set(value)
+        state = value
     }
 }

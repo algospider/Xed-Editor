@@ -63,64 +63,64 @@ class App : Application() {
         val iconPackManager = XedManager.iconPackManager
 
         AppScope.safeLaunch(context = AppDispatchers.IO) {
-            launch(AppDispatchers.IO) {
-                LspPersistence.restoreServers()
-            }
+            coroutineScope {
+                launch(AppDispatchers.IO) { LspPersistence.restoreServers() }
 
-            launch(AppDispatchers.IO) {
-                CommandProvider.buildCommands()
-                KeybindingsManager.loadKeybindings()
-            }
+                launch(AppDispatchers.IO) {
+                    CommandProvider.buildCommands()
+                    KeybindingsManager.loadKeybindings()
+                }
 
-            launch(AppDispatchers.IO) {
-                extensionManager.indexLocalExtensions()
-                extensionManager.loadAllExtensions()
-                registerActivityLifecycleCallbacks(ExtensionAPIManager)
-            }
+                launch(AppDispatchers.IO) {
+                    extensionManager.indexLocalExtensions()
+                    extensionManager.loadAllExtensions()
+                    registerActivityLifecycleCallbacks(ExtensionAPIManager)
+                }
 
-            launch(AppDispatchers.IO) { iconPackManager.indexIconPacks() }
+                launch(AppDispatchers.IO) { iconPackManager.indexIconPacks() }
 
-            launch(AppDispatchers.Startup) { LanguageManager.initGrammarRegistry() }
+                launch(AppDispatchers.IO) {
+                    LanguageManager.initGrammarRegistry()
+                    KeywordManager.initKeywordRegistry(this@App)
+                    CodeHighlighter.registerMarkdownCodeHighlighter(this@App)
+                }
 
-            launch(AppDispatchers.Startup) { KeywordManager.initKeywordRegistry(this@App) }
+                launch(AppDispatchers.IO) { SessionManager.preloadSession() }
 
-            launch(AppDispatchers.Startup) { CodeHighlighter.registerMarkdownCodeHighlighter(this@App) }
+                launch(AppDispatchers.IO) {
+                    val editorFontPath = Settings.editor_font_path.ifEmpty { DEFAULT_EDITOR_FONT_PATH }
+                    val isEditorAsset = if (Settings.editor_font_path.isNotEmpty()) Settings.is_editor_font_asset else true
 
-            launch(AppDispatchers.IO) { SessionManager.preloadSession() }
+                    val appFontPath = Settings.app_font_path.ifEmpty { DEFAULT_APP_FONT_PATH }
+                    val isAppAsset = if (Settings.app_font_path.isNotEmpty()) Settings.is_app_font_asset else true
 
-            launch(AppDispatchers.IO) {
-                val editorFontPath = Settings.editor_font_path.ifEmpty { DEFAULT_EDITOR_FONT_PATH }
-                val isEditorAsset = if (Settings.editor_font_path.isNotEmpty()) Settings.is_editor_font_asset else true
+                    val terminalFontPath = Settings.terminal_font_path.ifEmpty { DEFAULT_TERMINAL_FONT_PATH }
+                    val isTerminalAsset = if (Settings.terminal_font_path.isNotEmpty()) Settings.is_terminal_font_asset else true
 
-                val appFontPath = Settings.app_font_path.ifEmpty { DEFAULT_APP_FONT_PATH }
-                val isAppAsset = if (Settings.app_font_path.isNotEmpty()) Settings.is_app_font_asset else true
+                    FontCache.loadFont(this@App, editorFontPath, isEditorAsset)
+                    FontCache.loadFont(this@App, appFontPath, isAppAsset)
+                    FontCache.loadFont(this@App, terminalFontPath, isTerminalAsset)
+                }
 
-                val terminalFontPath = Settings.terminal_font_path.ifEmpty { DEFAULT_TERMINAL_FONT_PATH }
-                val isTerminalAsset = if (Settings.terminal_font_path.isNotEmpty()) Settings.is_terminal_font_asset else true
+                launch(AppDispatchers.Default) { Preference.preloadAllSettings() }
 
-                FontCache.loadFont(this@App, editorFontPath, isEditorAsset)
-                FontCache.loadFont(this@App, appFontPath, isAppAsset)
-                FontCache.loadFont(this@App, terminalFontPath, isTerminalAsset)
-            }
+                launch {
+                    DocumentProvider.setDocumentProviderEnabled(this@App, Settings.expose_home_dir)
+                }
 
-            launch(AppDispatchers.Startup) { Preference.preloadAllSettings() }
-
-            launch { DocumentProvider.setDocumentProviderEnabled(this@App, Settings.expose_home_dir) }
-
-            launch(AppDispatchers.IO) {
-                getTempDir().apply {
-                    if (exists() && listFiles().isNullOrEmpty().not()) {
-                        deleteRecursively()
+                launch(AppDispatchers.IO) {
+                    getTempDir().apply {
+                        if (exists() && listFiles().isNullOrEmpty().not()) {
+                            deleteRecursively()
+                        }
                     }
                 }
+
+                launch { runCatching { UpdateChecker.checkForUpdates("main") } }
             }
 
-            launch { runCatching { UpdateChecker.checkForUpdates("main") } }
-
-            // wait until UpdateManager is done, it should only take few milliseconds
             UpdateManager.inspect()
 
-            // debug options
             startThemeFlipperIfNotRunning()
         }
 
@@ -136,8 +136,7 @@ class App : Application() {
                         penaltyLog()
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             penaltyListener(Executors.newSingleThreadExecutor()) { violation ->
-                                violation.printStackTrace()
-                                violation.cause?.let { throw it }
+                                XedLog.e("StrictMode", "Violation: ${violation.violationDetails?.message ?: violation}", violation.cause)
                             }
                         }
                     }

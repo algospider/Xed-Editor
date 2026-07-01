@@ -6,9 +6,9 @@ import java.io.InputStream
 import java.io.OutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import org.eclipse.lsp4j.MessageType
 
 class ProcessConnection(private val cmd: Array<String>, instance: LspServerInstance) :
@@ -31,23 +31,23 @@ class ProcessConnection(private val cmd: Array<String>, instance: LspServerInsta
 
     override fun start() {
         if (process != null) return
-        scope = CoroutineScope(Dispatchers.IO)
-        runBlocking { process = ubuntuProcess(command = cmd) }
-
-        val proc = process ?: return
-
-        loggingInput =
-            LoggingInputStream(proc.inputStream) { json ->
-                Log.d("ProcessConnection", "[stdout] $json")
-                instance.addLog(LspLogEntry(MessageType.Log, "→ $json"))
-            }
-        loggingOutput =
-            LoggingOutputStream(proc.outputStream) { json ->
-                Log.d("ProcessConnection", "[stdin] $json")
-                instance.addLog(LspLogEntry(MessageType.Log, "← $json"))
-            }
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         scope?.launch {
+            val proc = ubuntuProcess(command = cmd)
+            process = proc
+
+            loggingInput =
+                LoggingInputStream(proc.inputStream) { json ->
+                    Log.d("ProcessConnection", "[stdout] $json")
+                    instance.addLog(LspLogEntry(MessageType.Log, "\u2192 $json"))
+                }
+            loggingOutput =
+                LoggingOutputStream(proc.outputStream) { json ->
+                    Log.d("ProcessConnection", "[stdin] $json")
+                    instance.addLog(LspLogEntry(MessageType.Log, "\u2190 $json"))
+                }
+
             runCatching {
                 proc.errorStream.bufferedReader().use { reader ->
                     reader.forEachLine { line ->

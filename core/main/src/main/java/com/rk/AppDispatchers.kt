@@ -1,6 +1,7 @@
 package com.rk
 
 import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.Executors
 
 object AppDispatchers {
     val IO = Dispatchers.IO
@@ -8,7 +9,9 @@ object AppDispatchers {
     val Default = Dispatchers.Default
     val Unconfined = Dispatchers.Unconfined
 
-    /** Single-threaded executor for heavy CPU-bound startup tasks.
-     *  Prevents startup CPU contention that causes main thread ANRs. */
-    val Startup = Dispatchers.Default.limitedParallelism(1)
+    private val startupThreadPool = Executors.newFixedThreadPool(2) { r ->
+        Thread(r, "xed-startup").apply { priority = Thread.NORM_PRIORITY }
+    }
+
+    val Startup = startupThreadPool.asCoroutineDispatcher()
 }

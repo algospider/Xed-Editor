@@ -8,7 +8,7 @@ import com.rk.ai.resolveRelativePathFromOpenEditor
 import com.rk.ai.resolveWorkspacePath
 import com.rk.tabs.editor.EditorTab
 import java.io.File
-import java.util.LinkedHashMap
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -18,9 +18,9 @@ import kotlinx.coroutines.withContext
 
 class FileService(private val tabRepository: TabRepository) {
 
-    private val pathCache = LinkedHashMap<String, PathCacheEntry>(32, 0.75f, true)
+    private val pathCache = ConcurrentHashMap<String, PathCacheEntry>()
     private val pathCacheMaxSize = 128
-    private val contentCache = LinkedHashMap<String, ContentCacheEntry>(16, 0.75f, true)
+    private val contentCache = ConcurrentHashMap<String, ContentCacheEntry>()
     private val contentCacheMaxSize = 64
     private val contentCacheMaxFileSize = 1_048_576L
 
@@ -39,7 +39,6 @@ class FileService(private val tabRepository: TabRepository) {
         } else if (!normalized.startsWith("file:") && !File(normalized).isAbsolute) {
             resolveRelativePathFromOpenEditor(normalized, tabRepository) ?: resolveWorkspacePath(workspaceStr, path)
         } else if (workspaceStr.isBlank() && File(normalized).isAbsolute) {
-            // No workspace configured - try direct absolute path
             val f = File(normalized)
             if (f.exists()) f.canonicalFile else null
         } else {
@@ -104,7 +103,7 @@ class FileService(private val tabRepository: TabRepository) {
             if (!file.exists() || !file.isFile) return@withContext null
             val length = file.length()
             val lastModified = file.lastModified()
-            
+
             val content = if (startLine != null || endLine != null) {
                 val s = startLine ?: 1
                 val e = endLine ?: Int.MAX_VALUE
@@ -116,12 +115,12 @@ class FileService(private val tabRepository: TabRepository) {
             } else {
                 file.readText()
             }
-            
+
             if (startLine == null && endLine == null && length <= contentCacheMaxFileSize) {
-                contentCache[canonical] = ContentCacheEntry(content, lastModified, now)
-                if (contentCache.size > contentCacheMaxSize) {
+                if (contentCache.size >= contentCacheMaxSize) {
                     contentCache.keys.firstOrNull()?.let { contentCache.remove(it) }
                 }
+                contentCache[canonical] = ContentCacheEntry(content, lastModified, now)
             }
             content
         }
