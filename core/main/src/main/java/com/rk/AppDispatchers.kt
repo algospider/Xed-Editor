@@ -1,6 +1,7 @@
 package com.rk
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import java.util.concurrent.Executors
 
 object AppDispatchers {

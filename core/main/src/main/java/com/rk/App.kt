@@ -136,7 +136,7 @@ class App : Application() {
                         penaltyLog()
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             penaltyListener(Executors.newSingleThreadExecutor()) { violation ->
-                                XedLog.e("StrictMode", "Violation: ${violation.violationDetails?.message ?: violation}", violation.cause)
+                                XedLog.e("StrictMode", "Violation: ${violation.localizedMessage ?: violation.toString()}", violation.cause)
                             }
                         }
                     }
