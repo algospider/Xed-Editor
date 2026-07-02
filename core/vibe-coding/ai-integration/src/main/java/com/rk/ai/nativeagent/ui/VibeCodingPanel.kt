@@ -192,6 +192,7 @@ fun VibeCodingPanel(
                 } else false
             },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { paddingValues ->
     Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
         // Suggestions sidebar
