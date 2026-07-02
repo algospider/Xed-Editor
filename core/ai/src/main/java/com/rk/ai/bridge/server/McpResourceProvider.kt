@@ -93,7 +93,7 @@ object McpResourceProvider {
         }
     }
 
-    private fun getDiagnosticsJson(ideService: IdeService): String {
+    private suspend fun getDiagnosticsJson(ideService: IdeService): String {
         val now = System.nanoTime()
         val cacheKey = "diagnostics"
         diagnosticsCache[cacheKey]?.let { cached ->
