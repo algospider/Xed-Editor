@@ -340,7 +340,7 @@ class GitViewModel : ViewModel() {
             var success = false
             try {
                 Git.open(currentRoot.value).use { git ->
-                    val result = git.fetch()
+                    git.fetch()
                         .setRemote(GIT_ORIGIN)
                         .setCredentialsProvider(
                             UsernamePasswordCredentialsProvider(Settings.git_username, Settings.git_password)
@@ -356,11 +356,6 @@ class GitViewModel : ViewModel() {
                         .setRemoveDeletedRefs(true)
                         .call()
                     success = true
-                    val messages = result.messages
-                    if (messages.isNotEmpty()) {
-                        @Suppress("UNUSED_EXPRESSION")
-                        messages
-                    }
                 }
             } catch (e: TransportException) {
                 val msg = (if (isAuthError(e)) strings.git_auth_error.getString() else e.message) ?: "Fetch failed"
@@ -532,7 +527,7 @@ class GitViewModel : ViewModel() {
         return try {
             Git.open(currentRoot.value).use { git ->
                 git.remoteList().call().map { remote ->
-                    val url = remote.uris.firstOrNull()?.toString() ?: ""
+                    val url = remote.getURIs().firstOrNull()?.toString() ?: ""
                     Pair(remote.name, url)
                 }
             }
