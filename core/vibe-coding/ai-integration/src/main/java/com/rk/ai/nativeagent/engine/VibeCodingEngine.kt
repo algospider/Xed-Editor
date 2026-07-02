@@ -76,6 +76,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -619,8 +622,75 @@ class VibeCodingEngine(
             add(listCustomCommandsTool)
         }
 
+        val dispatchTools = baseTools
+        val parallelTool = Tool(
+            name = "parallel",
+            description = "Execute multiple independent tool calls concurrently. Accepts a JSON array of {tool, args} objects. Results are ordered with headers showing which call produced which output.",
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        putJsonObject("calls") {
+                            put("type", "array")
+                            put("description", "Array of {tool: string, args: object} calls to run in parallel. Tools that modify state (writeFile, editFile, etc.) should NOT be parallelized with each other or with reads of the same files.")
+                            putJsonObject("items") {
+                                put("type", "object")
+                                putJsonObject("properties") {
+                                    putJsonObject("tool") { put("type", "string"); put("description", "Tool name to call") }
+                                    putJsonObject("args") { put("type", "object"); put("description", "Arguments for the tool") }
+                                }
+                                putJsonArray("required") { add(kotlinx.serialization.json.JsonPrimitive("tool")); add(kotlinx.serialization.json.JsonPrimitive("args")) }
+                            }
+                        }
+                    },
+                    required = listOf("calls"),
+                )
+            },
+            execute = { args ->
+                val obj = args.asJsonObject
+                val calls = obj["calls"]?.asJsonArray
+                    ?: return@Tool listOf(UIMessagePart.Text("Missing 'calls' array"))
+                val toolMap = dispatchTools.associateBy { it.name }
+
+                val results = coroutineScope {
+                    calls.map { callElement ->
+                        async {
+                            val callObj = runCatching { callElement.asJsonObject }.getOrElse {
+                                return@async listOf(UIMessagePart.Text("[Error] Invalid call element"))
+                            }
+                            val toolName = callObj["tool"]?.asJsonPrimitive?.asString ?: "?"
+                            val callArgs = callObj["args"] ?: com.google.gson.JsonObject()
+                            val tool = toolMap[toolName]
+                            if (tool == null) {
+                                listOf(UIMessagePart.Text("[Error] Unknown tool: $toolName"))
+                            } else {
+                                try {
+                                    tool.execute(callArgs)
+                                } catch (e: Exception) {
+                                    listOf(UIMessagePart.Text("[Error] $toolName failed: ${e.message}"))
+                                }
+                            }
+                        }
+                    }.awaitAll()
+                }
+
+                val combined = mutableListOf<UIMessagePart>()
+                for (i in results.indices) {
+                    val callObj = runCatching { calls[i].asJsonObject }.getOrElse { continue }
+                    val toolName = callObj["tool"]?.asJsonPrimitive?.asString ?: "?"
+                    val argHint = if (callObj["args"] is com.google.gson.JsonObject) {
+                        val keys = callObj["args"].asJsonObject.entrySet().take(2).joinToString(", ") { it.key }
+                        if (keys.isEmpty()) "" else " ($keys)"
+                    } else ""
+                    combined.add(UIMessagePart.Text("\n[Result ${i + 1} - $toolName$argHint]"))
+                    combined.addAll(results[i])
+                }
+
+                combined
+            }
+        )
+
         val cfg = configProvider.unifiedConfig.value
-        return baseTools
+        return (baseTools + parallelTool)
             .filter { tool -> cfg.isToolEnabled(tool.name) }
             .map { tool ->
                 permissionManager.wrapToolWithPermissionCheck(tool) { _state.value }

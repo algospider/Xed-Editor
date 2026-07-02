@@ -243,7 +243,7 @@ ${conversation.joinToString("\n") { m ->
 
     fun detectExcessiveReads(
         messages: List<UIMessage>,
-        readTools: Set<String> = setOf("readFile", "cat", "readFiles", "head", "getFileContent"),
+        readTools: Set<String> = setOf("readFile", "readFiles", "readAndEdit"),
         maxReadsPerWindow: Int = 100,
         windowSize: Int = 50,
         maxReReadsOfSameFile: Int = 5,
