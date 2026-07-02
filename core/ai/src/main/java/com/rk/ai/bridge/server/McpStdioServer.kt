@@ -9,14 +9,17 @@ import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.io.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.io.asSink
+import kotlinx.io.asSource
+import kotlinx.io.buffered
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
-import java.io.PrintStream
+import java.util.concurrent.atomic.AtomicReference
 
 class McpStdioServer(
     private val ideServiceProvider: () -> IdeService,
@@ -28,60 +31,30 @@ class McpStdioServer(
     @Volatile
     var toolRegistry: McpToolRegistry = McpToolRegistry()
 
-    private var serverScope: CoroutineScope? = null
-    private var activeServer: Server? = null
+    private val activeServer = AtomicReference<Server?>(null)
+    private var serverJob: Job? = null
 
-    val isRunning: Boolean get() = activeServer != null
+    val isRunning: Boolean get() = activeServer.get() != null
 
+    @Synchronized
     fun start(
         registry: McpToolRegistry,
         workspacePaths: List<String>,
         input: java.io.InputStream = System.`in`,
         output: java.io.OutputStream = System.out,
     ) {
-        if (isRunning) {
+        if (activeServer.get() != null) {
             if (com.rk.xededitor.BuildConfig.DEBUG) {
                 Log.w(TAG, "Stdio server already running")
             }
             return
         }
         toolRegistry = registry
+        val sdkServer = buildServer(registry, workspacePaths)
+        activeServer.set(sdkServer)
+
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        serverScope = scope
-
-        val sdkServer = Server(
-            serverInfo = Implementation(
-                name = "xed-ide-bridge-stdio",
-                version = "2.2.0",
-            ),
-            options = ServerOptions(
-                capabilities = ServerCapabilities(
-                    tools = ServerCapabilities.Tools(listChanged = true),
-                    resources = ServerCapabilities.Resources(
-                        listChanged = true,
-                        subscribe = true,
-                    ),
-                    prompts = ServerCapabilities.Prompts(listChanged = true),
-                ),
-            ),
-        )
-
-        registerToolsToSdkServer(
-            sdkServer = sdkServer,
-            registry = registry,
-            ideServiceProvider = ideServiceProvider,
-            progressCallback = { name, msg ->
-                if (com.rk.xededitor.BuildConfig.DEBUG) {
-                    Log.d(TAG, "Tool progress: $name - $msg")
-                }
-            },
-        )
-        McpResourceProvider.registerResources(sdkServer, workspacePaths, ideServiceProvider)
-        McpPromptProvider.registerPrompts(sdkServer)
-
-        activeServer = sdkServer
-
-        kotlinx.coroutines.runBlocking {
+        serverJob = scope.launch {
             try {
                 val transport = StdioServerTransport(
                     inputStream = input.asSource().buffered(),
@@ -89,24 +62,24 @@ class McpStdioServer(
                 )
                 sdkServer.createSession(transport)
                 if (com.rk.xededitor.BuildConfig.DEBUG) {
-                    Log.d(TAG, "Stdio MCP server started")
+                    Log.d(TAG, "Stdio MCP server session ended")
                 }
             } catch (e: Exception) {
                 if (com.rk.xededitor.BuildConfig.DEBUG) {
-                    Log.e(TAG, "Failed to start stdio server", e)
+                    Log.e(TAG, "Stdio server error", e)
                 }
-                activeServer = null
-                scope.cancel()
+                activeServer.set(null)
             }
         }
     }
 
+    @Synchronized
     fun startWithProcess(
         registry: McpToolRegistry,
         workspacePaths: List<String>,
         command: List<String>,
     ): Process? {
-        if (isRunning) return null
+        if (activeServer.get() != null) return null
         toolRegistry = registry
 
         return try {
@@ -114,23 +87,24 @@ class McpStdioServer(
             pb.redirectErrorStream(false)
             val process = pb.start()
 
-            val sdkServer = createServer(registry, workspacePaths)
-            activeServer = sdkServer
+            val sdkServer = buildServer(registry, workspacePaths)
+            activeServer.set(sdkServer)
 
-            val serverProcess = Thread(
-                Runnable {
-                    runBlocking {
-                        val transport = StdioServerTransport(
-                            inputStream = process.inputStream.asSource().buffered(),
-                            outputStream = process.outputStream.asSink().buffered(),
-                        )
-                        sdkServer.createSession(transport)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            serverJob = scope.launch {
+                try {
+                    val transport = StdioServerTransport(
+                        inputStream = process.inputStream.asSource().buffered(),
+                        outputStream = process.outputStream.asSink().buffered(),
+                    )
+                    sdkServer.createSession(transport)
+                } catch (e: Exception) {
+                    if (com.rk.xededitor.BuildConfig.DEBUG) {
+                        Log.e(TAG, "Stdio process server error", e)
                     }
-                },
-                "mcp-stdio-server",
-            )
-            serverProcess.isDaemon = true
-            serverProcess.start()
+                    activeServer.set(null)
+                }
+            }
 
             if (com.rk.xededitor.BuildConfig.DEBUG) {
                 Log.d(TAG, "Started MCP stdio server with process: ${command.joinToString(" ")}")
@@ -144,6 +118,7 @@ class McpStdioServer(
         }
     }
 
+    @Synchronized
     fun startWithPipes(
         registry: McpToolRegistry,
         workspacePaths: List<String>,
@@ -154,23 +129,24 @@ class McpStdioServer(
         val clientToServerIn = PipedInputStream(8192)
         val serverToClientOut = PipedOutputStream(clientToServerIn)
 
-        val sdkServer = createServer(registry, workspacePaths)
-        activeServer = sdkServer
+        val sdkServer = buildServer(registry, workspacePaths)
+        activeServer.set(sdkServer)
 
-        val thread = Thread(
-            Runnable {
-                runBlocking {
-                    val transport = StdioServerTransport(
-                        inputStream = clientToServerIn.asSource().buffered(),
-                        outputStream = serverToClientOut.asSink().buffered(),
-                    )
-                    sdkServer.createSession(transport)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        serverJob = scope.launch {
+            try {
+                val transport = StdioServerTransport(
+                    inputStream = clientToServerIn.asSource().buffered(),
+                    outputStream = serverToClientOut.asSink().buffered(),
+                )
+                sdkServer.createSession(transport)
+            } catch (e: Exception) {
+                if (com.rk.xededitor.BuildConfig.DEBUG) {
+                    Log.e(TAG, "Stdio pipe server error", e)
                 }
-            },
-            "mcp-stdio-pipe-server",
-        )
-        thread.isDaemon = true
-        thread.start()
+                activeServer.set(null)
+            }
+        }
 
         if (com.rk.xededitor.BuildConfig.DEBUG) {
             Log.d(TAG, "Started MCP stdio server with piped I/O")
@@ -178,7 +154,7 @@ class McpStdioServer(
         return Pair(serverToClientIn, clientToServerOut)
     }
 
-    private fun createServer(registry: McpToolRegistry, workspacePaths: List<String>): Server {
+    private fun buildServer(registry: McpToolRegistry, workspacePaths: List<String>): Server {
         val sdkServer = Server(
             serverInfo = Implementation(
                 name = "xed-ide-bridge-stdio",
@@ -210,13 +186,11 @@ class McpStdioServer(
         return sdkServer
     }
 
+    @Synchronized
     fun stop() {
-        runBlocking {
-            activeServer?.close()
-        }
-        activeServer = null
-        serverScope?.cancel()
-        serverScope = null
+        serverJob?.cancel()
+        serverJob = null
+        activeServer.getAndSet(null)?.close()
         if (com.rk.xededitor.BuildConfig.DEBUG) {
             Log.d(TAG, "Stdio MCP server stopped")
         }

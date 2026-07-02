@@ -5,16 +5,16 @@ import java.io.File
 
 fun readLineRange(file: File, startInclusive: Int, endInclusive: Int?): String {
     val sb = StringBuilder()
-    file.bufferedReader().use { reader ->
+    file.useLines { lines ->
+        val iterator = lines.iterator()
         var lineNum = 1
-        var line = reader.readLine()
-        while (line != null && (endInclusive == null || lineNum <= endInclusive)) {
+        while (iterator.hasNext() && (endInclusive == null || lineNum <= endInclusive)) {
+            val line = iterator.next()
             if (lineNum >= startInclusive) {
                 if (sb.isNotEmpty()) sb.append('\n')
                 sb.append(line)
             }
             lineNum++
-            line = reader.readLine()
         }
     }
     return sb.toString()

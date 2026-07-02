@@ -3,7 +3,10 @@ package com.rk.ai.bridge.external
 import android.util.Log
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.google.gson.JsonNull
+import com.google.gson.JsonPrimitive as GsonPrimitive
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -16,11 +19,19 @@ import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray as KxJsonArray
+import kotlinx.serialization.json.JsonElement as KxJsonElement
+import kotlinx.serialization.json.JsonNull as KxJsonNull
+import kotlinx.serialization.json.JsonObject as KxJsonObject
+import kotlinx.serialization.json.JsonPrimitive as KxJsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
+import java.net.HttpURLConnection
+import java.net.URI
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 import kotlin.time.Duration.Companion.seconds
@@ -109,15 +120,11 @@ class ExternalMcpClient(
                 lastException = e
                 consecutiveFailures++
                 val backoff = calculateBackoff(attempt)
-                if (com.rk.xededitor.BuildConfig.DEBUG) {
-                    Log.w(TAG, "Connection attempt $attempt/$MAX_RETRIES failed for '$serverName': ${e.message}, retrying in ${backoff}ms")
-                }
-                kotlinx.coroutines.delay(backoff)
+                d("Connection attempt $attempt/$MAX_RETRIES failed for '$serverName': ${e.message}, retrying in ${backoff}ms")
+                delay(backoff)
             }
         }
-        if (com.rk.xededitor.BuildConfig.DEBUG) {
-            Log.e(TAG, "All $MAX_RETRIES connection attempts failed for '$serverName'", lastException)
-        }
+        Log.e(TAG, "All $MAX_RETRIES connection attempts failed for '$serverName'", lastException)
         throw lastException ?: IllegalStateException("Connection failed")
     }
 
@@ -148,9 +155,7 @@ class ExternalMcpClient(
             )
             client.connect(transport)
             mcpClient = client
-            if (com.rk.xededitor.BuildConfig.DEBUG) {
-                Log.d(TAG, "Connected to external MCP server '$serverName' at $endpointUrl")
-            }
+            d("Connected to external MCP server '$serverName' at $endpointUrl")
         } catch (e: Exception) {
             mcpClient?.let { runCatching { runBlocking { it.close() } } }
             mcpClient = null
@@ -172,23 +177,21 @@ class ExternalMcpClient(
                 )
             }
         }.getOrElse { e ->
-            if (com.rk.xededitor.BuildConfig.DEBUG) {
-                Log.w(TAG, "Failed to list tools from '$serverName': ${e.message}")
-            }
+            Log.w(TAG, "Failed to list tools from '$serverName': ${e.message}")
             handleConnectionError(e)
             emptyList()
         }
     }
 
     suspend fun callTool(toolName: String, arguments: JsonObject): ExternalMcpCallResult {
-        val start = System.currentTimeMillis()
+        val startNanos = System.nanoTime()
         ensureConnected()
         val client = mcpClient
         if (client == null) {
             return ExternalMcpCallResult(
                 success = false, output = "",
                 error = "No MCP session for server '$serverName' at $baseUrl",
-                durationMs = System.currentTimeMillis() - start,
+                durationMs = nanosToMs(System.nanoTime() - startNanos),
             )
         }
         return runCatching {
@@ -211,33 +214,29 @@ class ExternalMcpClient(
                     else -> null
                 }
             }.joinToString("\n")
-            val duration = System.currentTimeMillis() - start
+            val durationMs = nanosToMs(System.nanoTime() - startNanos)
             consecutiveFailures = 0
             ExternalMcpCallResult(
                 success = result.isError != true,
                 output = text,
                 error = if (result.isError == true) text else "",
-                durationMs = duration,
+                durationMs = durationMs,
             )
         }.getOrElse { e ->
-            val duration = System.currentTimeMillis() - start
-            if (com.rk.xededitor.BuildConfig.DEBUG) {
-                Log.w(TAG, "Tool call '$toolName' failed on '$serverName': ${e.message}")
-            }
+            val durationMs = nanosToMs(System.nanoTime() - startNanos)
+            Log.w(TAG, "Tool call '$toolName' failed on '$serverName': ${e.message}")
             handleConnectionError(e)
             ExternalMcpCallResult(
                 success = false, output = "",
                 error = "Failed to call tool '$toolName' on server '$serverName': ${e.message}",
-                durationMs = duration,
+                durationMs = durationMs,
             )
         }
     }
 
     private suspend fun handleConnectionError(e: Throwable) {
         if (isConnectionError(e)) {
-            if (com.rk.xededitor.BuildConfig.DEBUG) {
-                Log.w(TAG, "Connection error detected for '$serverName', resetting connection")
-            }
+            Log.w(TAG, "Connection error detected for '$serverName', resetting connection")
             mcpClient?.let { runCatching { it.close() } }
             mcpClient = null
         }
@@ -256,8 +255,8 @@ class ExternalMcpClient(
 
     fun isReachable(): Boolean {
         return runCatching {
-            val url = java.net.URI(endpointUrl).toURL()
-            val conn = url.openConnection() as java.net.HttpURLConnection
+            val url = URI(endpointUrl).toURL()
+            val conn = url.openConnection() as HttpURLConnection
             conn.connectTimeout = 5000
             conn.readTimeout = 5000
             conn.requestMethod = "POST"
@@ -271,6 +270,7 @@ class ExternalMcpClient(
             }
             conn.outputStream.write("{}".toByteArray())
             val code = conn.responseCode
+            conn.disconnect()
             code in 200..499
         }.getOrDefault(false)
     }
@@ -297,33 +297,33 @@ class ExternalMcpClient(
         return obj
     }
 
-    private fun gsonToKotlinx(gson: JsonObject): kotlinx.serialization.json.JsonObject {
+    private fun gsonToKotlinx(gson: JsonObject): KxJsonObject {
         return mcpJson.parseToJsonElement(gson.toString()).jsonObject
     }
 
-    private fun kotlinxToGson(element: kotlinx.serialization.json.JsonElement): com.google.gson.JsonElement {
+    private fun kotlinxToGson(element: KxJsonElement): com.google.gson.JsonElement {
         return when (element) {
-            is kotlinx.serialization.json.JsonPrimitive -> {
+            is KxJsonPrimitive -> {
                 when {
-                    element.isString -> com.google.gson.JsonPrimitive(element.content)
+                    element.isString -> GsonPrimitive(element.content)
                     element.content == "true" || element.content == "false" ->
-                        com.google.gson.JsonPrimitive(element.content.toBoolean())
+                        GsonPrimitive(element.content.toBoolean())
                     else -> {
-                        element.content.toLongOrNull()?.let { com.google.gson.JsonPrimitive(it) }
-                            ?: element.content.toDoubleOrNull()?.let { com.google.gson.JsonPrimitive(it) }
-                            ?: com.google.gson.JsonPrimitive(element.content)
+                        element.content.toLongOrNull()?.let { GsonPrimitive(it) }
+                            ?: element.content.toDoubleOrNull()?.let { GsonPrimitive(it) }
+                            ?: GsonPrimitive(element.content)
                     }
                 }
             }
-            is kotlinx.serialization.json.JsonNull -> com.google.gson.JsonNull.INSTANCE
-            is kotlinx.serialization.json.JsonObject -> {
+            is KxJsonNull -> com.google.gson.JsonNull.INSTANCE
+            is KxJsonObject -> {
                 val obj = JsonObject()
                 for ((key, value) in element) {
                     obj.add(key, kotlinxToGson(value))
                 }
                 obj
             }
-            is kotlinx.serialization.json.JsonArray -> {
+            is KxJsonArray -> {
                 val arr = JsonArray()
                 for (item in element) {
                     arr.add(kotlinxToGson(item))
@@ -331,5 +331,11 @@ class ExternalMcpClient(
                 arr
             }
         }
+    }
+
+    private fun nanosToMs(nanos: Long): Long = nanos / 1_000_000
+
+    private fun d(msg: String) {
+        if (com.rk.xededitor.BuildConfig.DEBUG) Log.d(TAG, msg)
     }
 }

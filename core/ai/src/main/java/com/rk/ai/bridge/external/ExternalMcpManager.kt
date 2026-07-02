@@ -10,7 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -35,18 +35,22 @@ class ExternalMcpManager {
 
         managerScope.launch {
             disconnectAll()
-
             if (enabled.isEmpty()) {
                 onConfigChanged?.invoke(configJson)
                 return@launch
             }
 
-            val results = enabled.map { (name, cfg) ->
-                async {
-                    connectServer(name, cfg)
+            coroutineScope {
+                enabled.map { (name, cfg) ->
+                    async {
+                        runCatching {
+                            connectServer(name, cfg)
+                        }.onFailure { e ->
+                            Log.w(TAG, "Failed to connect MCP server '$name': ${e.message}")
+                        }
+                    }
                 }
             }
-            results.awaitAll()
             onConfigChanged?.invoke(configJson)
             notifyToolsChanged()
         }
@@ -101,7 +105,9 @@ class ExternalMcpManager {
     }
 
     suspend fun disconnectAll() {
-        clients.forEach { it.disconnect() }
+        clients.forEach { client ->
+            runCatching { client.disconnect() }
+        }
         clients.clear()
         schemas.clear()
         onToolsChanged?.invoke(emptyList())

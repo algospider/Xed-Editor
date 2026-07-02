@@ -29,7 +29,7 @@ class GetIdeInfoTool : BaseMcpTool() {
 class RunCommandTool : BaseMcpTool() {
     override fun getCategory(): String = "Terminal"
     override fun getName(): String = "runCommand"
-    override fun getDescription(): String = "Runs a shell command in the terminal environment. PREFER NATIVE MCP TOOLS instead: use readFile/cat for reading, searchCode/grep for search, findFiles/glob for file find, head for head, tail for tail, wc for word count, stat for metadata, listFiles/ls for directory listing. Only use runCommand for compiling, running, or package installs that have no native tool."
+    override fun getDescription(): String = "Runs a shell command in the terminal environment. PREFER NATIVE MCP TOOLS instead: readFile/cat for reading, searchCode/findInFiles/grep for search, findFiles/glob for file find, batchReplace/editFile for editing, diffFiles for comparing, head/tail/wc/stat for file info, listFiles/ls for directory listing. Only use runCommand for compiling, running, or package installs that have no native MCP tool."
     override fun getRequiredParams(): Map<String, String> = mapOf("command" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf("timeoutSeconds" to "number")
     override fun getRequiredParamDescriptions(): Map<String, String> = mapOf(

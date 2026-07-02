@@ -4,7 +4,6 @@ import com.google.gson.JsonObject
 import com.rk.ai.bridge.McpTool
 import com.rk.ai.bridge.McpToolContext
 import com.rk.ai.bridge.McpToolResult
-import com.rk.ai.bridge.textResult
 import java.io.File
 
 abstract class BaseMcpTool : McpTool {
@@ -17,16 +16,20 @@ abstract class BaseMcpTool : McpTool {
     }
 
     override suspend fun execute(args: JsonObject, context: McpToolContext): McpToolResult {
-        val start = System.currentTimeMillis()
+        val startNanos = System.nanoTime()
+        var success = false
         try {
             validateRequired(args)
             val result = executeValidated(args, context)
-            return result.copy(durationMs = System.currentTimeMillis() - start)
+            success = result.success
+            return result.copy(durationMs = nanosToMs(System.nanoTime() - startNanos))
         } catch (e: ToolError) {
-            return McpToolResult.error(e.message, duration = System.currentTimeMillis() - start)
+            return McpToolResult.error(e.message, duration = nanosToMs(System.nanoTime() - startNanos))
         } catch (e: Exception) {
             return McpToolResult.error("${e::class.java.simpleName}: ${e.message ?: "internal error"}",
-                duration = System.currentTimeMillis() - start)
+                duration = nanosToMs(System.nanoTime() - startNanos))
+        } finally {
+            ToolPerformanceTracker.record(getName(), nanosToMs(System.nanoTime() - startNanos), success)
         }
     }
 
@@ -101,23 +104,33 @@ abstract class BaseMcpTool : McpTool {
 
     protected fun resolvePathOrThrow(context: McpToolContext, path: String): File {
         val ideService = context.ideService
-        return ideService.resolvePath(path) ?: run {
-            val workspace = ideService.getPrimaryWorkspacePath()
-            if (workspace.isNotBlank()) {
-                val root = File(workspace)
-                val name = path.substringAfterLast("/").substringAfterLast("\\")
-                val suggestions = root.walkTopDown()
-                    .maxDepth(3)
-                    .onEnter { !it.name.startsWith(".") }
-                    .filter { !it.isDirectory && it.name.contains(name, ignoreCase = true) }
-                    .take(5)
-                    .map { it.absolutePath }
-                    .toList()
-                if (suggestions.isNotEmpty()) {
-                    throw ToolError.PathOutsideWorkspace("'$path' not found. Did you mean one of these?\n${suggestions.joinToString("\n")}")
-                }
-            }
+        val resolved = ideService.resolvePath(path)
+        if (resolved != null) return resolved
+
+        val workspace = ideService.getPrimaryWorkspacePath()
+        if (workspace.isBlank()) {
             throw ToolError.PathOutsideWorkspace("'$path' not found or outside workspace.")
+        }
+
+        WorkspaceFileIndex.ensureIndexed(workspace)
+
+        val nameOnly = path.substringAfterLast("/").substringAfterLast("\\")
+        val matches = WorkspaceFileIndex.findByNamePattern(nameOnly, maxResults = 5)
+        when {
+            matches.isEmpty() -> {
+                val prefix = WorkspaceFileIndex.findByNamePattern(path, maxResults = 5)
+                if (prefix.isEmpty()) {
+                    throw ToolError.PathOutsideWorkspace("'$path' not found. No matching files in workspace.")
+                }
+                throw ToolError.PathOutsideWorkspace("'$path' not found. Did you mean one of these?\n${prefix.joinToString("\n") { it.absolutePath }}")
+            }
+            matches.size == 1 -> return matches.single()
+            else -> {
+                val exactLower = path.lowercase()
+                val exact = matches.filter { it.name.lowercase() == exactLower || it.absolutePath.lowercase() == exactLower }
+                if (exact.size == 1) return exact.single()
+                throw ToolError.PathOutsideWorkspace("'$path' ambiguous. Did you mean one of these?\n${matches.joinToString("\n") { it.absolutePath }}")
+            }
         }
     }
 
@@ -141,4 +154,6 @@ abstract class BaseMcpTool : McpTool {
             }
         }
     }
+
+    private fun nanosToMs(nanos: Long): Long = nanos / 1_000_000
 }

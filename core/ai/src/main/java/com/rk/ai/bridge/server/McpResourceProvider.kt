@@ -5,15 +5,25 @@ import com.rk.ai.service.IdeService
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
 import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.coroutines.runBlocking
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 object McpResourceProvider {
     private const val TAG = "McpResourceProvider"
+    private val diagnosticsCache = ConcurrentHashMap<String, CachedDiagnostics>()
+    private const val CACHE_TTL_MS = 2_000L
+
+    private data class CachedDiagnostics(
+        val json: String,
+        val timestamp: Long,
+    )
 
     fun registerResources(
         server: Server,
@@ -44,7 +54,7 @@ object McpResourceProvider {
             description = "Current LSP diagnostics (errors, warnings) for open files",
             mimeType = "application/json",
         ) { _ ->
-            val diagnostics = buildDiagnosticsJson(ideServiceProvider())
+            val diagnostics = getDiagnosticsJson(ideServiceProvider())
             ReadResourceResult(
                 contents = listOf(
                     TextResourceContents(
@@ -83,6 +93,19 @@ object McpResourceProvider {
         }
     }
 
+    private fun getDiagnosticsJson(ideService: IdeService): String {
+        val now = System.nanoTime()
+        val cacheKey = "diagnostics"
+        diagnosticsCache[cacheKey]?.let { cached ->
+            if (now - cached.timestamp < CACHE_TTL_MS * 1_000_000L) {
+                return cached.json
+            }
+        }
+        val json = buildDiagnosticsJson(ideService)
+        diagnosticsCache[cacheKey] = CachedDiagnostics(json, now)
+        return json
+    }
+
     private fun buildWorkspaceTree(workspacePaths: List<String>): String {
         val tree = workspacePaths.map { ws ->
             val root = File(ws)
@@ -94,7 +117,7 @@ object McpResourceProvider {
             )
         }
         val elements = tree.map { node ->
-            kotlinx.serialization.json.buildJsonObject {
+            buildJsonObject {
                 put("path", JsonPrimitive(node["path"] as String))
                 put("name", JsonPrimitive(node["name"] as String))
                 @Suppress("UNCHECKED_CAST")
@@ -102,10 +125,7 @@ object McpResourceProvider {
                 put("children", serializeTreeNodes(children))
             }
         }
-        return kotlinx.serialization.json.Json.encodeToString(
-            kotlinx.serialization.json.JsonElement.serializer(),
-            kotlinx.serialization.json.JsonArray(elements),
-        )
+        return Json.encodeToString(JsonElement.serializer(), JsonArray(elements))
     }
 
     private fun buildDirTree(dir: File, maxDepth: Int, currentDepth: Int): List<Map<String, Any>> {
@@ -135,10 +155,10 @@ object McpResourceProvider {
         }
     }
 
-    private fun serializeTreeNodes(nodes: List<Map<String, Any>>): kotlinx.serialization.json.JsonArray {
-        return kotlinx.serialization.json.JsonArray(
+    private fun serializeTreeNodes(nodes: List<Map<String, Any>>): JsonArray {
+        return JsonArray(
             nodes.map { node ->
-                kotlinx.serialization.json.buildJsonObject {
+                buildJsonObject {
                     put("name", JsonPrimitive(node["name"] as String))
                     put("path", JsonPrimitive(node["path"] as String))
                     put("type", JsonPrimitive(node["type"] as String))
@@ -179,24 +199,20 @@ object McpResourceProvider {
 
     private fun buildDiagnosticsJson(ideService: IdeService): String {
         return try {
-            val openFiles = runBlocking { ideService.getOpenFiles() }
-            val results = kotlinx.serialization.json.buildJsonArray {
-                for (fileObj in openFiles) {
+            val fileObjects = ideService.getOpenFiles()
+            val results = buildJsonArray {
+                for (fileObj in fileObjects) {
                     val filePath = fileObj.get("path")?.asString ?: continue
-                    val diags = runBlocking { ideService.getDiagnostics(filePath) }
+                    val diags = ideService.getDiagnostics(filePath)
                     if (diags.size() > 0) {
-                        add(kotlinx.serialization.json.buildJsonObject {
+                        add(buildJsonObject {
                             put("file", JsonPrimitive(filePath))
-                            put("diagnostics", kotlinx.serialization.json.JsonElement.serializer().let {
-                                kotlinx.serialization.json.Json.parseToJsonElement(diags.toString())
-                            })
+                            put("diagnostics", Json.parseToJsonElement(diags.toString()))
                         })
                     }
                 }
             }
-            kotlinx.serialization.json.Json.encodeToString(
-                kotlinx.serialization.json.JsonElement.serializer(), results
-            )
+            Json.encodeToString(JsonElement.serializer(), results)
         } catch (_: Exception) {
             "[]"
         }

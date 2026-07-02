@@ -13,7 +13,6 @@ import com.rk.ai.bridge.external.ExternalMcpTool
 import com.rk.ai.service.IdeServiceImpl
 import com.rk.file.sandboxHomeDir
 import com.rk.xededitor.BuildConfig
-import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL

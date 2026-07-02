@@ -11,9 +11,11 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URI
+import java.util.concurrent.TimeUnit
 
 private const val GITHUB_API = "https://api.github.com"
 private const val USER_AGENT = "Xed-Editor/2.0"
+private const val GITHUB_TIMEOUT_MS = 30_000L
 
 class GitHubRepoInfoTool : BaseMcpTool() {
     override fun getCategory(): String = "GitHub"
@@ -156,8 +158,8 @@ class GitHubSearchCodeTool : BaseMcpTool() {
 private fun githubApiGet(urlStr: String): String {
     val url = URI(urlStr).toURL()
     val conn = url.openConnection() as HttpURLConnection
-    conn.connectTimeout = 20_000
-    conn.readTimeout = 20_000
+    conn.connectTimeout = GITHUB_TIMEOUT_MS
+    conn.readTimeout = GITHUB_TIMEOUT_MS
     conn.setRequestProperty("User-Agent", USER_AGENT)
     conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
 

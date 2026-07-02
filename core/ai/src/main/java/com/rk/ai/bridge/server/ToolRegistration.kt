@@ -63,6 +63,9 @@ private val ANNOTATION_MAP: Map<String, ToolAnnotations> = mapOf(
     "searchSymbols" to READ_ONLY,
     "findFiles" to READ_ONLY,
     "glob" to READ_ONLY,
+    "findInFiles" to READ_ONLY,
+    "batchReplace" to DESTRUCTIVE,
+    "diffFiles" to READ_ONLY,
     "semanticSearch" to OPEN_WORLD_READONLY,
 
     // Code Intelligence / LSP (read-only)
@@ -120,6 +123,10 @@ private val ANNOTATION_MAP: Map<String, ToolAnnotations> = mapOf(
     "planMode" to READ_ONLY,
     "dependencyAnalyzer" to READ_ONLY,
 
+    // Performance & Cache
+    "toolMetrics" to READ_ONLY,
+    "cacheStats" to READ_ONLY,
+
     // External MCP
     "mcpManager" to READ_ONLY,
 )
@@ -148,6 +155,7 @@ fun registerBuiltInTools(registry: McpToolRegistry) {
         register(SearchCodeTool()); register(GrepTool()); register(GrepSearchTool())
         register(SearchSymbolsTool())
         register(FindFilesTool()); register(GlobTool())
+        register(FindInFilesTool()); register(BatchReplaceTool()); register(DiffFilesTool())
         register(HeadTool()); register(TailTool()); register(WcTool())
         register(CountLinesTool()); register(StatTool())
         register(GetDiagnosticsTool()); register(FindDefinitionsTool()); register(FindReferencesTool())
@@ -170,6 +178,7 @@ fun registerBuiltInTools(registry: McpToolRegistry) {
         register(CustomInstructionsTool()); register(AgentWorkflowTool())
         register(PlanModeTool()); register(DependencyAnalyzerTool())
         register(ExternalMcpConfigTool())
+        register(ToolMetricsTool()); register(CacheStatsTool())
     }
 
     val names = registry.listNames().toList()
