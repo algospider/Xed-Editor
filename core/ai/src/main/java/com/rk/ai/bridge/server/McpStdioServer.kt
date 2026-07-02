@@ -190,7 +190,9 @@ class McpStdioServer(
     fun stop() {
         serverJob?.cancel()
         serverJob = null
-        activeServer.getAndSet(null)?.close()
+        activeServer.getAndSet(null)?.let { server ->
+            CoroutineScope(Dispatchers.Default).launch { server.close() }
+        }
         if (com.rk.xededitor.BuildConfig.DEBUG) {
             Log.d(TAG, "Stdio MCP server stopped")
         }

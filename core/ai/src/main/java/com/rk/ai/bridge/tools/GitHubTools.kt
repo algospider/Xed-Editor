@@ -158,8 +158,8 @@ class GitHubSearchCodeTool : BaseMcpTool() {
 private fun githubApiGet(urlStr: String): String {
     val url = URI(urlStr).toURL()
     val conn = url.openConnection() as HttpURLConnection
-    conn.connectTimeout = GITHUB_TIMEOUT_MS
-    conn.readTimeout = GITHUB_TIMEOUT_MS
+    conn.connectTimeout = GITHUB_TIMEOUT_MS.toInt()
+    conn.readTimeout = GITHUB_TIMEOUT_MS.toInt()
     conn.setRequestProperty("User-Agent", USER_AGENT)
     conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
 

@@ -16,6 +16,7 @@ import com.rk.xededitor.BuildConfig
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.runBlocking
 import java.security.SecureRandom
 
 private const val HEALTH_CHECK_TIMEOUT_MS = 2000

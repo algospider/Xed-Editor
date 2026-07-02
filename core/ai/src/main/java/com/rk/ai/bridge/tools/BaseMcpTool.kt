@@ -33,7 +33,7 @@ abstract class BaseMcpTool : McpTool {
         }
     }
 
-    protected abstract suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult
+    internal abstract suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult
 
     override fun getTimeoutMs(): Long = 60_000L
 

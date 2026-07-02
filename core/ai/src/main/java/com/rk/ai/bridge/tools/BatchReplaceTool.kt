@@ -107,7 +107,7 @@ ANNOTATION: DESTRUCTIVE — not idempotent if retried."""
         return McpToolResult.success("${summary}Found $totalReplacements replacements in ${results.size()} files.\n$results")
     }
 
-    private fun batchEditFiles(edits: JsonArray, context: McpToolContext, dryRun: Boolean): McpToolResult {
+    private suspend fun batchEditFiles(edits: JsonArray, context: McpToolContext, dryRun: Boolean): McpToolResult {
         val results = JsonArray()
         var successCount = 0
 

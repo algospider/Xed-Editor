@@ -197,7 +197,7 @@ object McpResourceProvider {
         return "File not found: $path"
     }
 
-    private fun buildDiagnosticsJson(ideService: IdeService): String {
+    private suspend fun buildDiagnosticsJson(ideService: IdeService): String {
         return try {
             val fileObjects = ideService.getOpenFiles()
             val results = buildJsonArray {
