@@ -13,6 +13,7 @@ import com.rk.ai.agent.events.SessionTodoStatus
 import com.rk.ai.agent.events.VibeCodingEvent
 import com.rk.ai.agent.events.VibeCodingEventBus
 import com.rk.ai.agent.files.CommandFileLoader
+import com.rk.ai.agent.files.CommandDefinition
 import com.rk.ai.agent.files.ConfigProvider
 import com.rk.ai.agent.files.DefaultContentSeeder
 import com.rk.ai.agent.files.FilesManager
@@ -142,9 +143,9 @@ class VibeCodingEngine(
     val settingsStore = SettingsStore(context, appScope)
 
     private val eventBus = AppEventBus()
-    private val filesManager = FilesManager(context, filesRepo, appScope)
-    private val mcpManager = McpManager(settingsStore, appScope, VibeCodingFileManager(context))
-    private     val skillManager = SkillManager(context, settingsStore)
+    private val skillManager = SkillManager(context, settingsStore) {
+        try { ideService.getPrimaryWorkspacePath() } catch (_: Exception) { "" }
+    }
     private val localTools = LocalTools(context, eventBus)
 
     val vibeEventBus = VibeCodingEventBus()
@@ -322,7 +323,33 @@ class VibeCodingEngine(
 
     fun loadFileCommandsIntoCatalog() {
         val fileCommands = CommandFileLoader.listCommands(context)
+        val workspace = try {
+            ideService.getPrimaryWorkspacePath()
+        } catch (_: Exception) { "" }
+
+        val workspaceCommands = if (workspace.isNotBlank()) {
+            val workspaceCommandsRoot = File(workspace, ".xed/commands")
+            if (workspaceCommandsRoot.exists() && workspaceCommandsRoot.isDirectory) {
+                workspaceCommandsRoot.listFiles()
+                    ?.filter { it.extension == "md" }
+                    ?.mapNotNull { file -> CommandFileLoader.parseFile(file) }
+                    ?: emptyList()
+            } else {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+
+        val merged = mutableMapOf<String, CommandDefinition>()
         for (cmd in fileCommands) {
+            merged[cmd.id] = cmd
+        }
+        for (cmd in workspaceCommands) {
+            merged[cmd.id] = cmd
+        }
+
+        for (cmd in merged.values) {
             if (cmd.hidden) continue
             addCommandToCatalog(CommandCatalogEntry(
                 id = "file:${cmd.id}",

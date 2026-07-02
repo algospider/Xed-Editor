@@ -97,7 +97,7 @@ fun VibeCodingPanel(
                             PaletteCommand("feature-dev", "Feature Dev", "Guided feature development", "Systematic 7-phase feature dev: discover, explore, design, implement, review", "Feature"),
                         )
                     }
-                    val fileCommands = remember {
+                    val fileCommands = remember(state.commandCatalog) {
                         engine.getCommandCatalog()
                             .filter { it.id.startsWith("file:") }
                             .map { cmd ->
@@ -110,8 +110,12 @@ fun VibeCodingPanel(
                                 )
                             }
                     }
+                    val displayedBuiltins = remember(builtinCommands, fileCommands) {
+                        val fileCommandIds = fileCommands.map { it.id.removePrefix("file:") }.toSet()
+                        builtinCommands.filter { it.id !in fileCommandIds }
+                    }
                     CommandPaletteSheet(
-                        builtinCommands = builtinCommands,
+                        builtinCommands = displayedBuiltins,
                         fileCommands = fileCommands,
                         onDismiss = { activePanel = ToolPanel.NONE },
                         onExecuteCommand = { command ->
@@ -219,7 +223,7 @@ fun VibeCodingPanel(
                 )
             }
 
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
                 // Toolbar
                 VibeCodingToolbar(
                     engine = engine,

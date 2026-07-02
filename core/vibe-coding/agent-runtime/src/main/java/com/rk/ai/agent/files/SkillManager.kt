@@ -12,6 +12,7 @@ import com.rk.ai.persistence.settings.SettingsStore
 class SkillManager(
     private val context: Context,
     private val settingsStore: SettingsStore,
+    private val workspacePath: () -> String = { "" },
 ) {
     companion object {
         private const val TAG = "SkillManager"
@@ -24,15 +25,36 @@ class SkillManager(
     }
 
     fun listSkills(): List<SkillMetadata> {
-        val skillsDir = getSkillsDir()
-        return skillsDir.listFiles()
+        val internalSkills = getSkillsDir().listFiles()
             ?.filter { it.isDirectory }
             ?.mapNotNull { dir ->
                 val skillFile = dir.resolve("SKILL.md")
                 if (!skillFile.exists()) return@mapNotNull null
                 parseSkillFile(skillFile, dir)
-            }
-            ?: emptyList()
+            } ?: emptyList()
+
+        val workspace = workspacePath()
+        val workspaceSkills = if (workspace.isNotBlank()) {
+            val workspaceSkillsRoot = File(workspace, ".xed/skills")
+            workspaceSkillsRoot.listFiles()
+                ?.filter { it.isDirectory }
+                ?.mapNotNull { dir ->
+                    val skillFile = dir.resolve("SKILL.md")
+                    if (!skillFile.exists()) return@mapNotNull null
+                    parseSkillFile(skillFile, dir)
+                } ?: emptyList()
+        } else {
+            emptyList()
+        }
+
+        val merged = mutableMapOf<String, SkillMetadata>()
+        for (skill in internalSkills) {
+            merged[skill.name] = skill
+        }
+        for (skill in workspaceSkills) {
+            merged[skill.name] = skill
+        }
+        return merged.values.toList()
     }
 
     fun readSkillBody(skillName: String): String? {
@@ -92,9 +114,9 @@ class SkillManager(
     }
 
     fun saveSkillFileBytesAtomically(skillName: String, files: Map<String, ByteArray>): Boolean {
-        val skillsDir = getSkillsDir()
         val targetDir = resolveSkillDir(skillName) ?: return false
-        val stagingDir = createTempSkillDir(skillsDir, skillName, "staging") ?: return false
+        val parentDir = targetDir.parentFile ?: return false
+        val stagingDir = createTempSkillDir(parentDir, skillName, "staging") ?: return false
         var backupDir: File? = null
 
         try {
@@ -107,7 +129,7 @@ class SkillManager(
             if (!stagingDir.resolve("SKILL.md").exists()) return false
 
             if (targetDir.exists()) {
-                backupDir = createTempSkillDir(skillsDir, skillName, "backup") ?: return false
+                backupDir = createTempSkillDir(parentDir, skillName, "backup") ?: return false
                 if (!targetDir.renameTo(backupDir)) return false
             }
 
@@ -148,6 +170,14 @@ class SkillManager(
     }
 
     private fun resolveSkillDir(skillName: String): File? {
+        val workspace = workspacePath()
+        if (workspace.isNotBlank()) {
+            val workspaceSkillsRoot = File(workspace, ".xed/skills")
+            val workspaceSkillDir = SkillPaths.resolveSkillDir(workspaceSkillsRoot, skillName)
+            if (workspaceSkillDir != null && workspaceSkillDir.exists()) {
+                return workspaceSkillDir
+            }
+        }
         return SkillPaths.resolveSkillDir(getSkillsDir(), skillName)
     }
 

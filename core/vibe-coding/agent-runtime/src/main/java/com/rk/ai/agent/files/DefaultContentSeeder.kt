@@ -6,7 +6,7 @@ import java.io.File
 
 object DefaultContentSeeder {
     private const val TAG = "DefaultContentSeeder"
-    private const val SEED_MARKER = ".seeded_v2"
+    private const val SEED_MARKER = ".seeded_v3"
 
     fun seedIfNeeded(context: Context) {
         val marker = File(context.filesDir, SEED_MARKER)
@@ -66,6 +66,19 @@ object DefaultContentSeeder {
         val existing = commandsDir.listFiles()?.map { it.nameWithoutExtension }?.toSet() ?: emptySet()
 
         val defaults = mapOf(
+            "init" to """
+                |---
+                |description: Initialize project instructions (AGENTS.md)
+                |category: Project
+                |---
+                |
+                |Analyze the codebase to initialize project instructions.
+                |1. Scan the project structure and detect the technology stack, build system, and frameworks.
+                |2. Check for existing documentation (README, build configs, package manifests).
+                |3. Generate a comprehensive `AGENTS.md` file in the project root containing stack details, common run/test/build commands, and styling conventions.
+                |4. Save the file and summarize the guidelines.
+            """.trimMargin(),
+
             "review" to """
                 |---
                 |description: Review recent code changes for bugs and quality
@@ -97,6 +110,7 @@ object DefaultContentSeeder {
                 |
                 |Stage all changes and create a descriptive commit message.
                 |Use conventional commit format: type(scope): description
+                |
                 |Valid types: feat, fix, docs, chore, refactor, test
                 |
                 |## GIT DIFF
@@ -110,6 +124,74 @@ object DefaultContentSeeder {
                 |## GIT STATUS --short
                 |
                 |!`git status --short`
+            """.trimMargin(),
+
+            "push" to """
+                |---
+                |description: Push commits to remote
+                |category: Git
+                |---
+                |
+                |Push the current git branch and commits to the remote repository.
+                |1. Run `git status` or `git branch` to find the active branch.
+                |2. Execute `git push` to push commits to origin.
+                |3. Report success or errors encountered.
+            """.trimMargin(),
+
+            "changelog" to """
+                |---
+                |description: Generate changelog from recent commits
+                |category: Project
+                |---
+                |
+                |Generate or update a `CHANGELOG.md` file based on recent commits.
+                |1. Get the list of recent commits using git log.
+                |2. Parse commit messages, grouping them by type (features, fixes, refactor, docs, chore).
+                |3. Format the changelog in clean markdown and update the `CHANGELOG.md` file.
+            """.trimMargin(),
+
+            "spellcheck" to """
+                |---
+                |description: Check spelling in markdown files
+                |category: Code
+                |---
+                |
+                |Scan modified markdown files for spelling mistakes and suggest corrections.
+                |1. Identify modified markdown (.md) files using git status.
+                |2. Scan their contents for obvious spelling errors or style issues.
+                |3. Report findings and offer to fix them.
+            """.trimMargin(),
+
+            "translate" to """
+                |---
+                |description: Translate documentation
+                |category: Project
+                |---
+                |
+                |Translate changed documentation or markdown files to other configured languages.
+                |1. Locate markdown files with uncommitted changes.
+                |2. Translate their contents, preserving formatting and code blocks intact.
+                |3. Save translated versions or output them as requested.
+            """.trimMargin(),
+
+            "summarize" to """
+                |---
+                |description: Summarize current conversation
+                |category: General
+                |---
+                |
+                |Create a concise, structured summary of the conversation context so far.
+                |Highlight key decisions, files created/modified, and pending tasks/next steps.
+            """.trimMargin(),
+
+            "compact" to """
+                |---
+                |description: Compact conversation context
+                |category: General
+                |---
+                |
+                |Compact the conversation history to free context window space.
+                |Summarize previous turns, retaining only essential facts, and prepare to resume.
             """.trimMargin(),
 
             "learn" to """
@@ -135,6 +217,28 @@ object DefaultContentSeeder {
                 |2. Read existing AGENTS.md files at relevant levels
                 |3. Create or update AGENTS.md at the appropriate level
                 |4. Keep entries to 1-3 lines per insight
+            """.trimMargin(),
+
+            "rmslop" to """
+                |---
+                |description: Remove AI-generated code slop
+                |category: Code
+                |---
+                |
+                |Clean up unnecessary comments, defensive checks, and style inconsistencies.
+                |1. Look for comments that merely restate code actions.
+                |2. Remove redundant or overly defensive try-catch blocks that mask errors.
+                |3. Align styles and refactor code to be clean, simple, and idiomatic.
+            """.trimMargin(),
+
+            "issues" to """
+                |---
+                |description: Find matching GitHub issues
+                |category: Git
+                |---
+                |
+                |Search GitHub issues matching the current context, errors, or modified files.
+                |Use search tools to locate troubleshooting information or matching issues.
             """.trimMargin(),
 
             "feature-dev" to """
