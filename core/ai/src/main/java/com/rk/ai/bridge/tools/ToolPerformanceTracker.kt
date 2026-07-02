@@ -2,7 +2,6 @@ package com.rk.ai.bridge.tools
 
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicLongArray
 
 data class ToolMetrics(
     val callCount: Long,
@@ -28,66 +27,60 @@ object ToolPerformanceTracker {
     private val allTimeMetrics = ConcurrentHashMap<String, MutableMetrics>()
 
     fun record(toolName: String, durationMs: Long, success: Boolean) {
-        val m = metrics.computeIfAbsent(toolName) { MutableMetrics() }
+        updateMetrics(metrics, toolName, durationMs, success)
+        updateMetrics(allTimeMetrics, toolName, durationMs, success)
+    }
+
+    private fun updateMetrics(
+        map: ConcurrentHashMap<String, MutableMetrics>,
+        toolName: String,
+        durationMs: Long,
+        success: Boolean,
+    ) {
+        val m = map.computeIfAbsent(toolName) { MutableMetrics() }
         m.callCount.incrementAndGet()
         m.totalTimeMs.addAndGet(durationMs)
 
-        runCatching {
-            while (true) {
-                val cur = m.minTimeMs.get()
-                if (durationMs >= cur) break
-                if (m.minTimeMs.compareAndSet(cur, durationMs)) break
-            }
-        }
-        runCatching {
-            while (true) {
-                val cur = m.maxTimeMs.get()
-                if (durationMs <= cur) break
-                if (m.maxTimeMs.compareAndSet(cur, durationMs)) break
-            }
-        }
+        casMin(m.minTimeMs, durationMs)
+        casMax(m.maxTimeMs, durationMs)
 
         if (!success) m.errorCount.incrementAndGet()
-
-        // Also update all-time
-        val a = allTimeMetrics.computeIfAbsent(toolName) { MutableMetrics() }
-        a.callCount.incrementAndGet()
-        a.totalTimeMs.addAndGet(durationMs)
-        runCatching {
-            while (true) { val c = a.minTimeMs.get(); if (durationMs >= c) break; if (a.minTimeMs.compareAndSet(c, durationMs)) break }
-        }
-        runCatching {
-            while (true) { val c = a.maxTimeMs.get(); if (durationMs <= c) break; if (a.maxTimeMs.compareAndSet(c, durationMs)) break }
-        }
-        if (!success) a.errorCount.incrementAndGet()
     }
 
-    fun getSnapshot(): Map<String, ToolMetrics> {
-        return metrics.mapValues { (_, m) ->
-            ToolMetrics(
-                callCount = m.callCount.get(),
-                totalTimeMs = m.totalTimeMs.get(),
-                minTimeMs = m.minTimeMs.get().let { if (it == Long.MAX_VALUE) 0L else it },
-                maxTimeMs = m.maxTimeMs.get(),
-                errorCount = m.errorCount.get(),
-            )
+    private fun casMin(field: AtomicLong, candidate: Long) {
+        while (true) {
+            val cur = field.get()
+            if (candidate >= cur) break
+            if (field.compareAndSet(cur, candidate)) break
         }
     }
 
-    fun getAllTime(): Map<String, ToolMetrics> {
-        return allTimeMetrics.mapValues { (_, m) ->
-            ToolMetrics(
-                callCount = m.callCount.get(),
-                totalTimeMs = m.totalTimeMs.get(),
-                minTimeMs = m.minTimeMs.get().let { if (it == Long.MAX_VALUE) 0L else it },
-                maxTimeMs = m.maxTimeMs.get(),
-                errorCount = m.errorCount.get(),
-            )
+    private fun casMax(field: AtomicLong, candidate: Long) {
+        while (true) {
+            val cur = field.get()
+            if (candidate <= cur) break
+            if (field.compareAndSet(cur, candidate)) break
         }
     }
+
+    fun getSnapshot(): Map<String, ToolMetrics> = toMetricsMap(metrics)
+
+    fun getAllTime(): Map<String, ToolMetrics> = toMetricsMap(allTimeMetrics)
 
     fun getToolMetrics(toolName: String): ToolMetrics? {
         val m = metrics[toolName] ?: return null
+        return toMetrics(toolName, m)
+    }
+
+    fun reset() { metrics.clear() }
+
+    fun resetAll() { metrics.clear(); allTimeMetrics.clear() }
+
+    private fun toMetricsMap(source: ConcurrentHashMap<String, MutableMetrics>): Map<String, ToolMetrics> {
+        return source.mapValues { (name, m) -> toMetrics(name, m) }
+    }
+
+    private fun toMetrics(name: String, m: MutableMetrics): ToolMetrics {
         return ToolMetrics(
             callCount = m.callCount.get(),
             totalTimeMs = m.totalTimeMs.get(),
@@ -96,8 +89,4 @@ object ToolPerformanceTracker {
             errorCount = m.errorCount.get(),
         )
     }
-
-    fun reset() { metrics.clear() }
-
-    fun resetAll() { metrics.clear(); allTimeMetrics.clear() }
 }

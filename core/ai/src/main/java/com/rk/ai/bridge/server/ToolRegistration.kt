@@ -113,11 +113,11 @@ private val ANNOTATION_MAP: Map<String, ToolAnnotations> = mapOf(
 
     // AI tools
     "codeReview" to READ_ONLY,
-    "testGenerator" to READ_ONLY,
-    "contextManager" to READ_ONLY,
-    "taskPlanner" to READ_ONLY,
-    "docGenerator" to READ_ONLY,
-    "codebaseIndexer" to READ_ONLY,
+    "generateTests" to READ_ONLY,
+    "manageContext" to READ_ONLY,
+    "planTask" to READ_ONLY,
+    "generateDocs" to READ_ONLY,
+    "indexCodebase" to READ_ONLY,
     "customInstructions" to READ_ONLY,
     "agentWorkflow" to READ_ONLY,
     "planMode" to READ_ONLY,

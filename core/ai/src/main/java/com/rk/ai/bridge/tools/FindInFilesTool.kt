@@ -45,10 +45,19 @@ Performance: parallel search across up to 500 files with backpressure."""
         if (workspace.isBlank()) return McpToolResult.error("No workspace path available")
 
         WorkspaceFileIndex.ensureIndexed(workspace)
+        val allIndexed = WorkspaceFileIndex.allFiles()
         val files = when {
             filePattern != null -> WorkspaceFileIndex.findByNamePattern(filePattern, maxResults = 500)
-            path != null -> WorkspaceFileIndex.findByNamePattern(path, maxResults = 500)
-            else -> WorkspaceFileIndex.allFiles()
+            path != null -> {
+                val resolved = context.ideService.resolvePath(path)
+                if (resolved != null && resolved.isDirectory) {
+                    val prefix = resolved.absolutePath
+                    allIndexed.filter { it.absolutePath.startsWith(prefix) }
+                } else {
+                    WorkspaceFileIndex.findByNamePattern(path, maxResults = 500)
+                }
+            }
+            else -> allIndexed
         }
 
         if (files.isEmpty()) return McpToolResult.success("No files matched the filter criteria.")

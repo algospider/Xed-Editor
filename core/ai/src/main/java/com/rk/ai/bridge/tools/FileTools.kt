@@ -27,7 +27,7 @@ class ReadFileTool : BaseMcpTool() {
         "count" to "Alias for lines"
     )
     override suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult {
-        val filePath = getPathParam(args) ?: throw ToolError.MissingParam("path/filePath/file")
+        val filePath = getPathParam(args) ?: throw ToolError.InvalidParam("path", "one of path/filePath/file is required")
         val file = resolvePathOrThrow(context, filePath)
         val startLine = optionalInt(args, "startLine")
         val endLine = optionalInt(args, "endLine")
@@ -67,7 +67,7 @@ class CatTool : BaseMcpTool() {
         "count" to "Alias for lines"
     )
     override suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult {
-        val filePath = getPathParam(args) ?: throw ToolError.MissingParam("path/filePath/file")
+        val filePath = getPathParam(args) ?: throw ToolError.InvalidParam("path", "one of path/filePath/file is required")
         val file = resolvePathOrThrow(context, filePath)
         val startLine = optionalInt(args, "startLine")
         val endLine = optionalInt(args, "endLine")

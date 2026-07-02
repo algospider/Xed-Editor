@@ -60,8 +60,8 @@ object ParallelSearchExecutor {
         }
 
         val semaphore = Semaphore(concurrency)
-        val allResults = mutableListOf<MatchResult>()
-        var truncated = false
+        val allResults = java.util.Collections.synchronizedList(mutableListOf<MatchResult>())
+        val truncatedFlag = java.util.concurrent.atomic.AtomicBoolean(false)
         var filesSearched = 0
 
         coroutineScope {
@@ -69,7 +69,7 @@ object ParallelSearchExecutor {
                 async(Dispatchers.IO) {
                     semaphore.acquire()
                     try {
-                        if (truncated || !isActive) {
+                        if (truncatedFlag.get() || !isActive) {
                             return@async emptyList<MatchResult>()
                         }
                         if (!file.isFile || !file.canRead() || file.length() > MAX_FILE_SIZE) {
@@ -85,7 +85,7 @@ object ParallelSearchExecutor {
 
                         for ((i, line) in lines.withIndex()) {
                             if (fileResults.size + allResults.size >= maxResults) {
-                                truncated = true
+                                truncatedFlag.set(true)
                                 break
                             }
                             val matched = if (isRegex) {
@@ -131,7 +131,7 @@ object ParallelSearchExecutor {
             .sortedWith(compareBy({ it.file.absolutePath }, { it.lineNumber }))
             .take(maxResults)
 
-        val wasTruncated = truncated || sorted.size < allResults.size
+        val wasTruncated = truncatedFlag.get() || sorted.size < allResults.size
 
         return SearchReport(
             results = sorted,

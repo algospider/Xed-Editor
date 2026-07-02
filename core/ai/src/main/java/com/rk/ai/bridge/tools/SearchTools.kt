@@ -18,7 +18,7 @@ class SearchCodeTool : BaseMcpTool() {
         "path" to "Scope search to a specific directory"
     )
     override suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult {
-        val query = getQueryParam(args) ?: throw ToolError.MissingParam("query/pattern/search/text")
+        val query = getQueryParam(args) ?: throw ToolError.InvalidParam("query", "one of query/pattern/search/text is required")
         val limit = (optionalPositiveInt(args, "limit") ?: 50).coerceIn(1, 500)
         val path = getPathParam(args)
         val results = context.ideService.searchCode(query, limit, path = path, isRegex = false)
@@ -46,7 +46,7 @@ class GrepTool : BaseMcpTool() {
         "path" to "Scoped directory"
     )
     override suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult {
-        val query = getQueryParam(args) ?: throw ToolError.MissingParam("query/pattern/search/text")
+        val query = getQueryParam(args) ?: throw ToolError.InvalidParam("query", "one of query/pattern/search/text is required")
         val limit = (optionalPositiveInt(args, "limit") ?: 50).coerceIn(1, 1000)
         val path = getPathParam(args)
         val results = context.ideService.searchCode(query, limit, path = path, isRegex = true)
@@ -71,8 +71,12 @@ class GrepSearchTool : BaseMcpTool() {
         "limit" to "Maximum results (default: 50, max: 1000)",
         "path" to "Scoped directory"
     )
+    private val delegate = GrepTool()
+    override suspend fun execute(args: JsonObject, context: McpToolContext): McpToolResult {
+        return delegate.execute(args, context)
+    }
     override suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult {
-        return GrepTool().executeValidated(args, context)
+        return delegate.executeValidated(args, context)
     }
 }
 
@@ -139,7 +143,11 @@ class GlobTool : BaseMcpTool() {
         "limit" to "Maximum results to return (default: 100)",
         "path" to "Directory to search in (default: workspace root)"
     )
+    private val delegate = FindFilesTool()
+    override suspend fun execute(args: JsonObject, context: McpToolContext): McpToolResult {
+        return delegate.execute(args, context)
+    }
     override suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult {
-        return FindFilesTool().executeValidated(args, context)
+        return delegate.executeValidated(args, context)
     }
 }

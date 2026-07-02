@@ -17,7 +17,7 @@ import java.nio.charset.Charset
 
 class WebFetchTool : BaseMcpTool() {
     override fun getCategory(): String = "Web"
-    override fun getName(): String = "web_fetch"
+    override fun getName(): String = "webFetch"
     override fun getDescription(): String = "Fetches and extracts readable content from a URL. Supports text, HTML, JSON, XML, and markdown output. Use web_download for binary files."
     override fun getRequiredParams(): Map<String, String> = mapOf("url" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf(
@@ -72,7 +72,7 @@ class WebFetchTool : BaseMcpTool() {
 
 class WebDownloadTool : BaseMcpTool() {
     override fun getCategory(): String = "Web"
-    override fun getName(): String = "web_download"
+    override fun getName(): String = "webDownload"
     override fun getDescription(): String = "Downloads a URL to a workspace file. Creates parent directories automatically and preserves binary content."
     override fun getRequiredParams(): Map<String, String> = mapOf("url" to "string", "outputPath" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf("timeout" to "number", "maxBytes" to "number", "overwrite" to "boolean")
@@ -114,7 +114,7 @@ class WebDownloadTool : BaseMcpTool() {
 
 class WebSearchTool : BaseMcpTool() {
     override fun getCategory(): String = "Web"
-    override fun getName(): String = "web_search"
+    override fun getName(): String = "webSearch"
     override fun getDescription(): String = "Searches the web using DuckDuckGo HTML results and returns titles, URLs, and snippets."
     override fun getRequiredParams(): Map<String, String> = mapOf("query" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf("numResults" to "number")
@@ -135,7 +135,7 @@ class WebSearchTool : BaseMcpTool() {
 
 class WebResearchTool : BaseMcpTool() {
     override fun getCategory(): String = "Web"
-    override fun getName(): String = "web_research"
+    override fun getName(): String = "webResearch"
     override fun getDescription(): String = "Searches the web and optionally fetches top result pages for research. Returns sources plus readable excerpts."
     override fun getRequiredParams(): Map<String, String> = mapOf("query" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf(

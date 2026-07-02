@@ -19,7 +19,7 @@ private const val GITHUB_TIMEOUT_MS = 30_000L
 
 class GitHubRepoInfoTool : BaseMcpTool() {
     override fun getCategory(): String = "GitHub"
-    override fun getName(): String = "github_repo_info"
+    override fun getName(): String = "githubRepoInfo"
     override fun getDescription(): String = "Gets information about a GitHub repository (stars, forks, description, etc.)."
     override fun getRequiredParams(): Map<String, String> = mapOf("repo" to "string")
     override fun getRequiredParamDescriptions(): Map<String, String> = mapOf(
@@ -54,7 +54,7 @@ class GitHubRepoInfoTool : BaseMcpTool() {
 
 class GitHubReadmeTool : BaseMcpTool() {
     override fun getCategory(): String = "GitHub"
-    override fun getName(): String = "github_readme"
+    override fun getName(): String = "githubReadme"
     override fun getDescription(): String = "Fetches the README content of a GitHub repository."
     override fun getRequiredParams(): Map<String, String> = mapOf("repo" to "string")
     override fun getRequiredParamDescriptions(): Map<String, String> = mapOf(
@@ -76,7 +76,7 @@ class GitHubReadmeTool : BaseMcpTool() {
 
 class GitHubFileFetchTool : BaseMcpTool() {
     override fun getCategory(): String = "GitHub"
-    override fun getName(): String = "github_file_fetch"
+    override fun getName(): String = "githubFileFetch"
     override fun getDescription(): String = "Fetches a specific file from a GitHub repository."
     override fun getRequiredParams(): Map<String, String> = mapOf("repo" to "string", "path" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf("branch" to "string")
@@ -115,7 +115,7 @@ class GitHubFileFetchTool : BaseMcpTool() {
 
 class GitHubSearchCodeTool : BaseMcpTool() {
     override fun getCategory(): String = "GitHub"
-    override fun getName(): String = "github_search_code"
+    override fun getName(): String = "githubSearchCode"
     override fun getDescription(): String = "Searches code on GitHub using the search API."
     override fun getRequiredParams(): Map<String, String> = mapOf("query" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf("limit" to "number", "repo" to "string")

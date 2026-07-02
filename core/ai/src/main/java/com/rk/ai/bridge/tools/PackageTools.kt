@@ -15,7 +15,7 @@ import java.net.URLEncoder
 
 class NpmSearchTool : BaseMcpTool() {
     override fun getCategory(): String = "Package Management"
-    override fun getName(): String = "npm_search"
+    override fun getName(): String = "npmSearch"
     override fun getDescription(): String = "Searches npm registry for packages."
     override fun getRequiredParams(): Map<String, String> = mapOf("query" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf("limit" to "number")
@@ -58,7 +58,7 @@ class NpmSearchTool : BaseMcpTool() {
 
 class PipSearchTool : BaseMcpTool() {
     override fun getCategory(): String = "Package Management"
-    override fun getName(): String = "pip_search"
+    override fun getName(): String = "pipSearch"
     override fun getDescription(): String = "Searches PyPI (Python Package Index) for packages."
     override fun getRequiredParams(): Map<String, String> = mapOf("query" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf("limit" to "number")
@@ -74,10 +74,10 @@ class PipSearchTool : BaseMcpTool() {
         val query = requireString(args, "query")
         val limit = (optionalPositiveInt(args, "limit") ?: 10).coerceIn(1, 50)
 
-        val url = "https://pypi.org/simple/"
+        val url = "https://pypi.org/search/?q=${java.net.URLEncoder.encode(query, "UTF-8")}&page=1"
         val html = httpGet(url)
         val lines = html.split("\n")
-            .filter { it.contains(query, ignoreCase = true) }
+            .filter { it.contains("class=\"package-snippet\"", ignoreCase = true) }
             .map { it.replace(Regex("<[^>]*>"), "").trim() }
             .filter { it.isNotBlank() }
             .take(limit)
@@ -94,7 +94,7 @@ class PipSearchTool : BaseMcpTool() {
 
 class MavenSearchTool : BaseMcpTool() {
     override fun getCategory(): String = "Package Management"
-    override fun getName(): String = "maven_search"
+    override fun getName(): String = "mavenSearch"
     override fun getDescription(): String = "Searches Maven Central for artifacts."
     override fun getRequiredParams(): Map<String, String> = mapOf("query" to "string")
     override fun getOptionalParams(): Map<String, String> = mapOf("limit" to "number")
