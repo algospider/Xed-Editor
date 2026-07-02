@@ -897,27 +897,17 @@ class VibeCodingEngine(
     private fun isComplexTask(text: String): Boolean {
         val lower = text.lowercase()
         
-        // Only route truly complex multi-step tasks through orchestrator
-        // Single-action requests should go through streaming pipeline
-        val multiStepIndicators = listOf(
-            "first.*then.*finally",
-            "step 1.*step 2",
-            "phase 1.*phase 2",
-            "refactor.*entire",
-            "rewrite.*module",
-            "implement.*feature.*test",
-            "create.*update.*delete",
-            "migrate.*from.*to",
-        )
-        val hasMultiStepPattern = multiStepIndicators.any { pattern ->
-            lower.contains(Regex(pattern))
-        }
+        // Only route genuinely large refactors through the orchestrator.
+        // Modern AI agents handle most multi-step tasks fine in the streaming pipeline.
+        val explicitOrchestrate = lower.contains("use the orchestrator") ||
+            lower.contains("use autonomous mode") ||
+            lower.contains("full rewrite")
         
-        // Very long requests with multiple action verbs
+        // Only trigger for genuinely large tasks (5+ action verbs = true multi-file refactor)
         val actionVerbs = listOf("refactor", "implement", "create", "build", "migrate", "rewrite", "convert")
         val verbCount = actionVerbs.count { lower.contains(it) }
         
-        return hasMultiStepPattern || verbCount >= 3
+        return explicitOrchestrate || verbCount >= 5
     }
 
     private fun ensureSessionExists(titleHint: String) {

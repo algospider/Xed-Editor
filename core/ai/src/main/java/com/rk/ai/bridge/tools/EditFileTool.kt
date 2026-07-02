@@ -9,26 +9,25 @@ class EditFileTool : BaseMcpTool() {
     override fun getCategory(): String = "File Operations"
     override fun getName(): String = "editFile"
     override fun getDescription(): String =
-        "Surgically edits a file by finding and replacing exact text. " +
-            "Use this instead of writeFile when you only need to change specific parts of a file."
+        "Replace exact text in a file via find-and-replace. Preferred for targeted edits. " +
+            "Provide enough surrounding context in oldString for a unique match. Use replaceAll=true to replace all occurrences."
 
     override fun getRequiredParams(): Map<String, String> = mapOf(
         "filePath" to "string", "oldString" to "string", "newString" to "string"
     )
     override fun getRequiredParamDescriptions(): Map<String, String> = mapOf(
         "filePath" to "Absolute path to the file to edit",
-        "oldString" to "The exact text to find in the file (must match exactly, including whitespace)",
-        "newString" to "The replacement text"
+        "oldString" to "The exact text to find. Must match whitespace exactly. Include surrounding lines for uniqueness.",
+        "newString" to "The replacement text. Can be empty to delete oldString."
     )
     override fun getOptionalParams(): Map<String, String> = mapOf(
         "path" to "string", "file" to "string",
-        "dryRun" to "boolean", "partialMatch" to "boolean"
+        "replaceAll" to "boolean"
     )
     override fun getOptionalParamDescriptions(): Map<String, String> = mapOf(
         "path" to "Alternative to filePath",
         "file" to "Alternative to filePath",
-        "dryRun" to "If true, reports whether the edit would succeed without applying it (default: false)",
-        "partialMatch" to "If true, allows matching a unique suffix/prefix of oldString when exact match fails (default: false)"
+        "replaceAll" to "Replace all occurrences (default: false)"
     )
     override fun getBlankRequiredParams(): Set<String> = setOf("newString")
 
@@ -36,8 +35,7 @@ class EditFileTool : BaseMcpTool() {
         val filePath = requireString(args, "filePath")
         val oldString = requireString(args, "oldString")
         val newString = requireString(args, "newString", allowBlank = true)
-        val dryRun = optionalBoolean(args, "dryRun")
-        val partialMatch = optionalBoolean(args, "partialMatch")
+        val replaceAll = optionalBoolean(args, "replaceAll")
 
         val file = resolvePathOrThrow(context, filePath)
         if (!file.exists()) throw ToolError.FileNotFound(filePath)
@@ -56,34 +54,8 @@ class EditFileTool : BaseMcpTool() {
                 val trimmedIndex = content.indexOf(oldTrimmed)
                 if (trimmedIndex != -1 && content.indexOf(oldTrimmed, trimmedIndex + 1) == -1) {
                     val newContent = content.substring(0, trimmedIndex) + newString + content.substring(trimmedIndex + oldTrimmed.length)
-                    if (dryRun) return McpToolResult.success("[dry-run] Found unique match by trimming whitespace. Would edit ${file.name}")
                     return applyEdit(ideService, file, content, newContent, filePath)
                 }
-            }
-
-            if (partialMatch) {
-                val lines = content.split("\n")
-                val oldTrimmed = oldString.trim()
-                val lineMatches = mutableListOf<Pair<Int, String>>()
-                lines.forEachIndexed { i, line ->
-                    if (line.contains(oldTrimmed)) lineMatches.add(i + 1 to line)
-                }
-                if (lineMatches.isEmpty()) {
-                    val suggestions = lines.filter { it.length > 20 }
-                        .map { it.trim().take(120) }
-                        .take(5)
-                    throw ToolError.InvalidParam("oldString",
-                        "text not found in file. Did you mean one of these?\n" +
-                            suggestions.joinToString("\n"))
-                }
-                if (lineMatches.size == 1) {
-                    val (lineNum, lineContent) = lineMatches[0]
-                    val newContent = content.replace(lineContent, newString)
-                    if (dryRun) return McpToolResult.success("[dry-run] Would edit ${file.name} at line $lineNum")
-                    return applyEdit(ideService, file, content, newContent, filePath)
-                }
-                throw ToolError.InvalidParam("oldString",
-                    "text not found exactly. Found ${lineMatches.size} partial line matches at lines: ${lineMatches.joinToString(", ") { it.first.toString() }}. Use a more specific match.")
             }
 
             val similar = findSimilar(content, oldString)
@@ -91,25 +63,25 @@ class EditFileTool : BaseMcpTool() {
                 "text not found in ${file.name}.${if (similar.isNotEmpty()) " Did you mean:\n$similar" else ""}")
         }
 
-        val nextIndex = content.indexOf(oldString, index + oldString.length)
-        if (nextIndex != -1) {
-            val occurrences = mutableListOf<Int>()
-            var searchFrom = 0
-            while (true) {
-                val idx = content.indexOf(oldString, searchFrom)
-                if (idx == -1) break
-                val lineNum = content.substring(0, idx).count { it == '\n' } + 1
-                occurrences.add(lineNum)
-                searchFrom = idx + 1
+        if (!replaceAll) {
+            val nextIndex = content.indexOf(oldString, index + oldString.length)
+            if (nextIndex != -1) {
+                val occurrences = mutableListOf<Int>()
+                var searchFrom = 0
+                while (true) {
+                    val idx = content.indexOf(oldString, searchFrom)
+                    if (idx == -1) break
+                    val lineNum = content.substring(0, idx).count { it == '\n' } + 1
+                    occurrences.add(lineNum)
+                    searchFrom = idx + 1
+                }
+                throw ToolError.InvalidParam("oldString",
+                    "found ${occurrences.size} occurrences at lines: ${occurrences.joinToString(", ")}. " +
+                        "Use replaceAll=true or include more context for a unique match.")
             }
-            throw ToolError.InvalidParam("oldString",
-                "found ${occurrences.size} occurrences of oldString at lines: ${occurrences.joinToString(", ")}. " +
-                    "Include more context from the surrounding code to make a unique match.")
         }
 
-        val newContent = content.replaceRange(index, index + oldString.length, newString)
-        if (dryRun) return McpToolResult.success("[dry-run] Would edit ${file.name} at character offset $index")
-
+        val newContent = if (replaceAll) content.replace(oldString, newString) else content.replaceRange(index, index + oldString.length, newString)
         return applyEdit(ideService, file, content, newContent, filePath)
     }
 

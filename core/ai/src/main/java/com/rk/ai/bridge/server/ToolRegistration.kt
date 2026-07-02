@@ -25,22 +25,16 @@ private val ANNOTATION_MAP: Map<String, ToolAnnotations> = mapOf(
 
     // File Operations
     "readFile" to READ_ONLY,
-    "cat" to READ_ONLY,
     "readFiles" to READ_ONLY,
     "writeFile" to DESTRUCTIVE,
     "listFiles" to READ_ONLY,
-    "ls" to READ_ONLY,
     "openFile" to READ_ONLY,
     "createFile" to DESTRUCTIVE_IDEMPOTENT,
     "deleteFile" to DESTRUCTIVE,
     "renameFile" to DESTRUCTIVE,
-    "moveFile" to DESTRUCTIVE,
     "createDirectory" to DESTRUCTIVE_IDEMPOTENT,
-    "mkdir" to DESTRUCTIVE_IDEMPOTENT,
-    "head" to READ_ONLY,
     "tail" to READ_ONLY,
     "wc" to READ_ONLY,
-    "countLines" to READ_ONLY,
     "stat" to READ_ONLY,
     "editFile" to DESTRUCTIVE,
     "applyBatchEdits" to DESTRUCTIVE,
@@ -58,11 +52,8 @@ private val ANNOTATION_MAP: Map<String, ToolAnnotations> = mapOf(
 
     // Search (read-only)
     "searchCode" to READ_ONLY,
-    "grep" to READ_ONLY,
-    "grepSearch" to READ_ONLY,
     "searchSymbols" to READ_ONLY,
     "findFiles" to READ_ONLY,
-    "glob" to READ_ONLY,
     "findInFiles" to READ_ONLY,
     "batchReplace" to DESTRUCTIVE,
     "diffFiles" to READ_ONLY,
@@ -142,9 +133,9 @@ fun McpTool.withAnnotations(): McpTool {
 fun registerBuiltInTools(registry: McpToolRegistry) {
     registry.apply {
         register(GetIdeInfoTool()); register(GetGuidelinesTool())
-        register(ReadFileTool()); register(CatTool())
+        register(ReadFileTool())
         register(ReadFilesTool()); register(WriteFileTool())
-        register(ListFilesTool()); register(LsTool())
+        register(ListFilesTool())
         register(OpenFileTool())
         register(GetOpenFilesTool()); register(GetActiveFileTool())
         register(GetSelectionTool()); register(ReplaceSelectionTool()); register(InsertAtCursorTool())
@@ -152,17 +143,17 @@ fun registerBuiltInTools(registry: McpToolRegistry) {
         register(OpenDiffTool()); register(GetDiffResultTool()); register(RejectDiffTool())
         register(RunCommandTool()); register(ShowMessageTool())
         register(GetEnvironmentTool()); register(GetClipboardTool()); register(WriteToClipboardTool())
-        register(SearchCodeTool()); register(GrepTool()); register(GrepSearchTool())
+        register(SearchCodeTool())
         register(SearchSymbolsTool())
-        register(FindFilesTool()); register(GlobTool())
+        register(FindFilesTool())
         register(FindInFilesTool()); register(BatchReplaceTool()); register(DiffFilesTool())
-        register(HeadTool()); register(TailTool()); register(WcTool())
-        register(CountLinesTool()); register(StatTool())
+        register(TailTool()); register(WcTool())
+        register(StatTool())
         register(GetDiagnosticsTool()); register(FindDefinitionsTool()); register(FindReferencesTool())
         register(RenameSymbolTool()); register(FormatDocumentTool())
         register(GetGitStatusTool()); register(GetGitDiffTool()); register(GitCommitTool()); register(GitCheckoutTool())
-        register(CreateFileTool()); register(DeleteFileTool()); register(RenameFileTool()); register(MoveFileTool())
-        register(CreateDirectoryTool()); register(MkdirTool())
+        register(CreateFileTool()); register(DeleteFileTool()); register(RenameFileTool())
+        register(CreateDirectoryTool())
         register(ApplyBatchEditsTool()); register(EditFileTool())
         register(GetTerminalOutputTool())
         register(GetProjectStructureTool()); register(GetProjectSummaryTool())

@@ -22,8 +22,8 @@ class ToolCache(
 
     private val READ_TOOLS = setOf(
         "getProjectStructure", "getProjectSummary", "getProjectConfig",
-        "listFiles", "ls", "getOpenFiles", "searchCode", "grep",
-        "searchSymbols", "getProjectInstructions", "searchProjectInstructions",
+        "listFiles", "getOpenFiles", "searchCode",
+        "searchSymbols", "searchAndRead", "getProjectInstructions", "searchProjectInstructions",
         "indexCodebase", "semanticSearch", "getGuidelines",
         "getEnvironment", "getIdeInfo",
     )
@@ -54,7 +54,7 @@ class ToolCache(
     fun invalidateAll() { cache.clear() }
 
     fun invalidateProjectCache() {
-        for (tool in setOf("getProjectStructure", "getProjectSummary", "getProjectConfig", "listFiles", "ls", "indexCodebase")) {
+        for (tool in setOf("getProjectStructure", "getProjectSummary", "getProjectConfig", "listFiles", "indexCodebase")) {
             invalidate(tool)
         }
     }

@@ -49,7 +49,7 @@ class VibeCodingFileTools(private val ideService: IdeService) {
 
     private val readFile = Tool(
         name = "readFile",
-        description = "Read the contents of a file. Supports startLine/endLine (1-indexed, inclusive). Content truncated at 250KB.",
+        description = "Read a file by path (supports startLine/endLine, 1-indexed, inclusive). Content truncated at 250KB.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -76,37 +76,9 @@ class VibeCodingFileTools(private val ideService: IdeService) {
         },
     )
 
-    private val cat = Tool(
-        name = "cat",
-        description = "Alias for readFile. Same as readFile. Accepts: path, filePath, file.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("path") { put("type", "string"); put("description", "Absolute or relative path to the file") }
-                    putJsonObject("filePath") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("file") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("startLine") { put("type", "integer") }
-                    putJsonObject("endLine") { put("type", "integer") }
-                },
-                required = emptyList(),
-            )
-        },
-        execute = { args ->
-            val obj = args.asJsonObject
-            val rawPath = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("Missing path/filePath/file argument"))
-            val startLine = obj["startLine"]?.asJsonPrimitive?.asInt
-            val endLine = obj["endLine"]?.asJsonPrimitive?.asInt
-            val resolved = ideService.resolvePath(rawPath)
-            val filePath = resolved?.absolutePath ?: rawPath
-            val content = ideService.getFileContent(filePath, startLine, endLine)
-            if (content != null) listOf(UIMessagePart.Text(content))
-            else listOf(UIMessagePart.Text("File not found: $rawPath"))
-        },
-    )
-
     private val readFiles = Tool(
         name = "readFiles",
-        description = "RECOMMENDED: Reads multiple files at once. Input can be comma-separated paths or JSON array of path strings.",
+        description = "Read multiple files in one call. Pass comma-separated paths or a JSON array path strings. Faster than repeated readFile calls.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -132,7 +104,7 @@ class VibeCodingFileTools(private val ideService: IdeService) {
 
     private val writeFile = Tool(
         name = "writeFile",
-        description = "Write content to a file. Creates parent directories if needed. Opens a review tab for the user to confirm.",
+        description = "Write or overwrite a file. Creates parent directories automatically. Opens a review tab for user confirmation.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -155,16 +127,14 @@ class VibeCodingFileTools(private val ideService: IdeService) {
 
     private val editFile = Tool(
         name = "editFile",
-        description = "Surgically replace text in a file using exact string matching. PREFERRED for targeted changes. Supports dryRun, partialMatch, and replaceAll.",
+        description = "Find exact text in a file and replace it. Preferred for targeted edits. Provide enough context in oldString for a unique match. Use replaceAll=true to replace all occurrences.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("filePath") { put("type", "string"); put("description", "Absolute path to the file") }
-                    putJsonObject("oldString") { put("type", "string"); put("description", "The exact text to find and replace") }
-                    putJsonObject("newString") { put("type", "string"); put("description", "The replacement text") }
-                    putJsonObject("replaceAll") { put("type", "boolean"); put("description", "Replace all occurrences if true") }
-                    putJsonObject("dryRun") { put("type", "boolean"); put("description", "Only report whether the edit would succeed") }
-                    putJsonObject("partialMatch") { put("type", "boolean"); put("description", "Allow matching suffix/prefix if exact match fails") }
+                    putJsonObject("oldString") { put("type", "string"); put("description", "The exact text to find. Must match whitespace exactly. Include surrounding lines for uniqueness.") }
+                    putJsonObject("newString") { put("type", "string"); put("description", "The replacement text. Can be empty to delete oldString.") }
+                    putJsonObject("replaceAll") { put("type", "boolean"); put("description", "Replace all occurrences (default: false)") }
                 },
                 required = listOf("filePath", "oldString", "newString"),
             )
@@ -174,15 +144,12 @@ class VibeCodingFileTools(private val ideService: IdeService) {
             val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing filePath"))
             val oldString = obj["oldString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing oldString"))
             val newString = obj["newString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing newString"))
-            val dryRun = obj["dryRun"]?.asJsonPrimitive?.asBoolean ?: false
-            val partialMatch = obj["partialMatch"]?.asJsonPrimitive?.asBoolean ?: false
             val replaceAll = obj["replaceAll"]?.asJsonPrimitive?.asBoolean ?: false
             val file = ideService.resolvePath(filePath)
             if (file == null) return@Tool listOf(UIMessagePart.Text("Path could not be resolved: $filePath"))
             val resolvedPath = file.absolutePath
             val content = ideService.getFileContent(resolvedPath, null, null) ?: return@Tool listOf(UIMessagePart.Text("File not found: $resolvedPath"))
 
-            // Count occurrences of oldString
             var matchCount = 0
             var searchIdx = 0
             while (true) {
@@ -192,50 +159,27 @@ class VibeCodingFileTools(private val ideService: IdeService) {
                 searchIdx += oldString.length
             }
 
-            // Handle exact match not found
             if (matchCount == 0) {
-                if (partialMatch) {
-                    val partialIdx = content.indexOf(oldString.take(minOf(oldString.length, 30)))
-                    if (partialIdx != -1) {
-                        if (dryRun) return@Tool listOf(UIMessagePart.Text("[dry-run] Would edit $resolvedPath via partial match"))
-                        val result = content.replace(oldString, newString)
-                        ideService.writeFile(file, result)
-                        return@Tool listOf(UIMessagePart.Text("Edited $resolvedPath (partial match)"))
-                    }
-                }
-                return@Tool listOf(UIMessagePart.Text("Could not find the specified text in $resolvedPath"))
+                return@Tool listOf(UIMessagePart.Text("Text not found in $resolvedPath. Ensure the whitespace in oldString matches the file exactly."))
             }
 
-            // Handle multiple matches without replaceAll
             if (matchCount > 1 && !replaceAll) {
                 return@Tool listOf(UIMessagePart.Text(
                     "Found $matchCount matches in $resolvedPath. " +
-                    "Provide more surrounding context in oldString to identify the correct match, or use replaceAll=true."
+                    "Use replaceAll=true or add more surrounding context to oldString for a unique match."
                 ))
             }
 
-            // Dry run
-            if (dryRun) {
-                val mode = if (replaceAll) "replaceAll" else "single"
-                return@Tool listOf(UIMessagePart.Text("[dry-run] Would edit $resolvedPath ($mode: ${oldString.length} chars -> ${newString.length} chars)"))
-            }
-
-            // Execute edit
             val result = content.replace(oldString, newString)
             ideService.writeFile(file, result)
-
-            val note = when {
-                replaceAll -> " (replaced all $matchCount occurrences)"
-                matchCount == 1 -> ""
-                else -> ""
-            }
+            val note = if (replaceAll) " (replaced all $matchCount occurrences)" else ""
             listOf(UIMessagePart.Text("Edited $resolvedPath$note"))
         },
     )
 
     private val multiEditFile = Tool(
         name = "multiEditFile",
-        description = "RECOMMENDED for targeted edits. Replace multiple non-contiguous blocks of text in a single file atomically. Provide an array of edits with oldString and newString. Fails if any oldString is not found exactly once.",
+        description = "Replace multiple blocks of text in a single file atomically. Each edit must have a unique oldString match. Fails entirely if any edit cannot be applied exactly once.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -315,7 +259,7 @@ class VibeCodingFileTools(private val ideService: IdeService) {
 
     private val applyBatchEdits = Tool(
         name = "applyBatchEdits",
-        description = "RECOMMENDED: Applies multiple file changes at once. ALWAYS use this for cross-file refactorings to ensure consistency and minimize turns. Takes a JSON object where keys are absolute file paths and values are new content.",
+        description = "Write new content to multiple files at once. Keys are file paths, values are full file content. Use for cross-file changes to minimize turns.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -356,7 +300,7 @@ class VibeCodingFileTools(private val ideService: IdeService) {
 
     private val createFile = Tool(
         name = "createFile",
-        description = "Create a new file with optional initial content. Creates parent directories automatically.",
+        description = "Create a new file with optional initial content. Parent directories created automatically.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -377,7 +321,7 @@ class VibeCodingFileTools(private val ideService: IdeService) {
 
     private val deleteFile = Tool(
         name = "deleteFile",
-        description = "Delete a file from the workspace.",
+        description = "Delete a file permanently from the workspace.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -416,7 +360,7 @@ class VibeCodingFileTools(private val ideService: IdeService) {
 
     private val listFiles = Tool(
         name = "listFiles",
-        description = "List files in a directory. Supports recursive listing with maxFiles limit.",
+        description = "List files in a directory. Supports recursive mode and maxFiles limit.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -442,40 +386,9 @@ class VibeCodingFileTools(private val ideService: IdeService) {
         },
     )
 
-    private val ls = Tool(
-        name = "ls",
-        description = "Same as listFiles. Lists directory contents. Accepts: path, directoryPath.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("path") { put("type", "string"); put("description", "Directory path to list") }
-                    putJsonObject("directoryPath") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("recursive") { put("type", "boolean"); put("description", "List files recursively (default: false)") }
-                    putJsonObject("maxFiles") { put("type", "integer"); put("description", "Maximum number of files to return (default: 500, max: 5000)") }
-                },
-                required = emptyList(),
-            )
-        },
-        execute = { args ->
-            val obj = args.asJsonObject
-            val path = obj["path"]?.asJsonPrimitive?.asString
-                ?: obj["directoryPath"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("Missing path/directoryPath"))
-            val recursive = obj["recursive"]?.asJsonPrimitive?.asBoolean ?: false
-            val maxFiles = (obj["maxFiles"]?.asJsonPrimitive?.asInt ?: 500).coerceIn(1, 5000)
-            val file = ideService.resolvePath(path)
-            if (file != null && file.isDirectory) {
-                val entries = ideService.listFiles(file, recursive, maxFiles)
-                listOf(UIMessagePart.Text(entries.joinToString("\n")))
-            } else {
-                listOf(UIMessagePart.Text("Directory not found: $path"))
-            }
-        },
-    )
-
     private val findFiles = Tool(
         name = "findFiles",
-        description = "Finds files by glob patterns like '*.kt' or '**/*.java'. Accepts: query, pattern, limit, path.",
+        description = "Find files by glob pattern (e.g. '*.kt' or '**/*.java'). Returns matching file paths.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -512,81 +425,12 @@ class VibeCodingFileTools(private val ideService: IdeService) {
             } else {
                 listOf(UIMessagePart.Text("No files found matching: $query"))
             }
-        },
-    )
-
-    private val glob = Tool(
-        name = "glob",
-        description = "Alias for findFiles. Finds files by glob patterns. Accepts: query, pattern, limit, path.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("query") { put("type", "string"); put("description", "File name or glob pattern to search for (e.g. *.kt, **/*.java)") }
-                    putJsonObject("pattern") { put("type", "string"); put("description", "Alternative to query") }
-                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 100)") }
-                    putJsonObject("path") { put("type", "string"); put("description", "Directory to search in (default: workspace root)") }
-                },
-                required = emptyList(),
-            )
-        },
-        execute = { args ->
-            val obj = args.asJsonObject
-            val query = obj["query"]?.asJsonPrimitive?.asString
-                ?: obj["pattern"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("Missing query/pattern"))
-            val limit = obj["limit"]?.asJsonPrimitive?.asInt ?: 100
-            val rawPath = obj["path"]?.asJsonPrimitive?.asString
-            val resolvedDir = if (rawPath != null) ideService.resolvePath(rawPath)?.absolutePath else null
-            val results = ideService.findFiles(query, limit, resolvedDir ?: rawPath)
-            if (results.size() > 0) {
-                val text = results.joinToString("\n") { element ->
-                    when {
-                        element.isJsonObject -> {
-                            val path = element.asJsonObject["path"]?.asString ?: element.toString()
-                            val name = element.asJsonObject["name"]?.asString
-                            if (name != null) "$path ($name)" else path
-                        }
-                        element.isJsonPrimitive -> element.asString
-                        else -> element.toString()
-                    }
-                }
-                listOf(UIMessagePart.Text(text))
-            } else {
-                listOf(UIMessagePart.Text("No files found matching: $query"))
-            }
-        },
-    )
-
-    private val head = Tool(
-        name = "head",
-        description = "Reads first N lines of a file. Accepts: path, filePath, file, lines, count.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("path") { put("type", "string"); put("description", "Absolute or relative path to the file") }
-                    putJsonObject("filePath") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("file") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("lines") { put("type", "integer"); put("description", "Number of lines to read from the top (default: 10, max: 10000)") }
-                    putJsonObject("count") { put("type", "integer"); put("description", "Alias for lines") }
-                },
-                required = emptyList(),
-            )
-        },
-        execute = { args ->
-            val obj = args.asJsonObject
-            val rawPath = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("Missing path/filePath/file"))
-            val n = (obj["lines"]?.asJsonPrimitive?.asInt ?: obj["count"]?.asJsonPrimitive?.asInt ?: 10).coerceIn(1, 10000)
-            val resolved = ideService.resolvePath(rawPath)
-            val filePath = resolved?.absolutePath ?: rawPath
-            val content = ideService.getFileContent(filePath, 1, n)
-            if (content != null) listOf(UIMessagePart.Text(content))
-            else listOf(UIMessagePart.Text("File not found: $rawPath"))
         },
     )
 
     private val tail = Tool(
         name = "tail",
-        description = "Reads last N lines of a file. Accepts: path, filePath, file, lines, count.",
+        description = "Read the last N lines of a file. Useful for logs, recent output, or the end of generated files.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -615,7 +459,7 @@ class VibeCodingFileTools(private val ideService: IdeService) {
 
     private val wc = Tool(
         name = "wc",
-        description = "Counts lines/words/chars/bytes. Accepts: path, filePath, file.",
+        description = "Count lines, words, characters, and bytes in a file. Accepts path/filePath/file.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -650,37 +494,9 @@ class VibeCodingFileTools(private val ideService: IdeService) {
         },
     )
 
-    private val countLines = Tool(
-        name = "countLines",
-        description = "Fast buffered byte-level line counting. Accepts: path, filePath, file.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("path") { put("type", "string"); put("description", "Absolute or relative path to the file") }
-                    putJsonObject("filePath") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("file") { put("type", "string"); put("description", "Alternative to path") }
-                },
-                required = emptyList(),
-            )
-        },
-        execute = { args ->
-            val obj = args.asJsonObject
-            val path = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("Missing path/filePath/file"))
-            val file = ideService.resolvePath(path) ?: return@Tool listOf(UIMessagePart.Text("Path not found: $path"))
-            val text = ideService.getFileContent(file.absolutePath, null, null)
-                ?: return@Tool listOf(UIMessagePart.Text("File not found: ${file.absolutePath}"))
-            val lines = if (text.isEmpty()) 0L else text.count { it == '\n' }.toLong()
-            val result = JsonObject().apply {
-                addProperty("lines", lines)
-                addProperty("path", file.absolutePath)
-            }.toString()
-            listOf(UIMessagePart.Text(result))
-        },
-    )
-
     private val stat = Tool(
         name = "stat",
-        description = "Gets file metadata (size, permissions, modified time). Accepts: path, filePath, file.",
+        description = "Get file metadata (size, permissions, modified time, extension, parent). Accepts path/filePath/file.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -717,10 +533,10 @@ class VibeCodingFileTools(private val ideService: IdeService) {
     )
 
     val all: List<Tool> = listOf(
-        readFile, cat, readFiles, writeFile, editFile, multiEditFile, applyBatchEdits,
+        readFile, readFiles, writeFile, editFile, multiEditFile, applyBatchEdits,
         createFile, deleteFile, renameFile,
-        listFiles, ls, findFiles, glob,
-        head, tail, wc, countLines, stat,
+        listFiles, findFiles,
+        tail, wc, stat,
     )
 
     private fun humanReadableSize(bytes: Long): String {

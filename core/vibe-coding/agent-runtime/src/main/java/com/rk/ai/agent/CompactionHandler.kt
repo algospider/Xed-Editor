@@ -244,21 +244,26 @@ ${conversation.joinToString("\n") { m ->
     fun detectExcessiveReads(
         messages: List<UIMessage>,
         readTools: Set<String> = setOf("readFile", "cat", "readFiles", "head", "getFileContent"),
-        maxReadsPerWindow: Int = 30,
-        windowSize: Int = 30,
+        maxReadsPerWindow: Int = 100,
+        windowSize: Int = 50,
+        maxReReadsOfSameFile: Int = 5,
     ): Boolean {
         val recentMessages = messages.takeLast(windowSize)
-        val readTargets = mutableSetOf<String>()
+        val readTargets = mutableMapOf<String, Int>()
         var readCount = 0
         for (msg in recentMessages) {
             for (tool in msg.getTools().filter { it.toolName in readTools && it.isExecuted }) {
                 readCount++
                 val path = extractFilePath(tool.input)
-                if (path != null) readTargets.add(path)
+                if (path != null) {
+                    readTargets[path] = (readTargets[path] ?: 0) + 1
+                }
             }
         }
         if (readCount <= maxReadsPerWindow) return false
-        if (readTargets.size >= readCount / 2) return false
+        // Only flag it if the same file is being re-read many times (true waste)
+        val maxReReads = readTargets.values.maxOrNull() ?: return false
+        if (maxReReads < maxReReadsOfSameFile) return false
         return true
     }
 
@@ -282,28 +287,19 @@ ${conversation.joinToString("\n") { m ->
     ): UIMessage {
         val message = when (loopType) {
             "doom_loop" -> """
-[SYSTEM: The tool '$toolName' has been called repeatedly with the same arguments.
-This appears to be a loop. Try a fundamentally different approach:
-- Read the relevant file first to see what's actually there
-- Check if you already have the information you need
-- Use a different tool or strategy entirely
-- If you're stuck, call getGuidelines for help]
+[SYSTEM: The tool '$toolName' was called with the same input. Pivot to a different approach and continue.]
 
 [RECOMMENDATION: $details]
 """.trimIndent()
 
             "pattern_loop" -> """
-[SYSTEM: The agent appears to be stuck in a loop calling the same tools repeatedly.
-Stop calling these tools and provide a summary of what you have found so far.
-If you need more information, try a completely different approach or ask the user for guidance.]
+[SYSTEM: Same tool sequence detected. Pivot to a different strategy and continue.]
 
 [RECOMMENDATION: $details]
 """.trimIndent()
 
             "excessive_reads" -> """
-[SYSTEM: You have performed many file read operations recently.
-Before reading more files, check if you already have the information you need.
-Focus on synthesizing what you know and making progress toward the goal.]
+[SYSTEM NOTE: You've been reading many files. That's fine — use `readFiles` to batch multiple paths in one call for efficiency. Continue your work.]
 
 [RECOMMENDATION: $details]
 """.trimIndent()

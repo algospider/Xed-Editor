@@ -424,37 +424,37 @@ class GenerationHandler(
                 }
             }
 
-            // Pattern-based doom loop: detect repeated sequences of tool names (even with different args)
+            // Pattern-based doom loop detection — hint and let the AI self-correct
             val currentToolNames = executedTools.map { it.toolName }
             recentToolNameSequences.add(currentToolNames)
             if (recentToolNameSequences.size > PATTERN_WINDOW) {
                 recentToolNameSequences.removeAt(0)
             }
             if (CompactionHandler.detectPatternLoop(recentToolNameSequences)) {
-                Log.w(TAG, "Pattern doom loop detected: tool sequence repeated ${recentToolNameSequences.size} times")
+                Log.w(TAG, "Pattern loop detected, injecting hint")
                 val toolsCalled = recentToolNameSequences.flatten().distinct().joinToString(", ")
                 val recoveryMsg = CompactionHandler.buildRecoveryMessage(
                     loopType = "pattern_loop",
                     toolName = toolsCalled,
-                    details = "Stop calling $toolsCalled and provide a summary. Try a completely different approach."
+                    details = "Try a different approach."
                 )
                 messages = messages + recoveryMsg
                 send(GenerationChunk.Messages(messages))
                 recentToolNameSequences.clear()
-                break
+                continue
             }
 
-            // Excessive reads detection
+            // Excessive reads detection — soft hint, don't break the loop
             if (CompactionHandler.detectExcessiveReads(messages)) {
-                Log.w(TAG, "Excessive file reads detected, injecting hint")
-                val recoveryMsg = CompactionHandler.buildRecoveryMessage(
+                Log.w(TAG, "Many file reads detected, injecting efficiency hint")
+                val hintMsg = CompactionHandler.buildRecoveryMessage(
                     loopType = "excessive_reads",
                     toolName = "readFiles/readFile",
-                    details = "Focus on synthesizing what you already know and making progress."
+                    details = "Consider batching reads with readFiles() instead of individual readFile() calls. Continue with your task."
                 )
-                messages = messages + recoveryMsg
+                messages = messages + hintMsg
                 send(GenerationChunk.Messages(messages))
-                break
+                continue
             }
 
             // Auto-recovery: check for failed tools and attempt recovery

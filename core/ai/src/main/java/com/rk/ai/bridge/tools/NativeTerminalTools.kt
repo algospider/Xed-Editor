@@ -5,39 +5,6 @@ import com.rk.ai.bridge.McpToolContext
 import com.rk.ai.bridge.McpToolResult
 import java.io.File
 
-class HeadTool : BaseMcpTool() {
-    override fun getCategory(): String = "File Operations"
-    override fun getName(): String = "head"
-    override fun getDescription(): String = "Reads first N lines of a file. Accepts: path, filePath, file, lines, count."
-    override fun getOptionalParams(): Map<String, String> = mapOf(
-        "path" to "string", "filePath" to "string", "file" to "string",
-        "lines" to "number", "count" to "number"
-    )
-    override fun getOptionalParamDescriptions(): Map<String, String> = mapOf(
-        "path" to "Absolute or relative path to the file",
-        "filePath" to "Alternative to path",
-        "file" to "Alternative to path",
-        "lines" to "Number of lines to read from the top (default: 10, max: 10000)",
-        "count" to "Alias for lines"
-    )
-    override suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult {
-        val filePath = getPathParam(args) ?: throw ToolError.MissingParam("path/filePath/file")
-        val file = resolvePathOrThrow(context, filePath)
-        val n = (optionalInt(args, "lines") ?: optionalInt(args, "count") ?: 10).coerceIn(1, 10000)
-        val content = file.bufferedReader().use { reader ->
-            val lines = mutableListOf<String>()
-            var remaining = n
-            while (remaining > 0) {
-                val line = reader.readLine() ?: break
-                lines.add(line)
-                remaining--
-            }
-            lines.joinToString("\n")
-        }
-        return McpToolResult.success(content)
-    }
-}
-
 class TailTool : BaseMcpTool() {
     override fun getCategory(): String = "File Operations"
     override fun getName(): String = "tail"
@@ -168,43 +135,5 @@ class StatTool : BaseMcpTool() {
             if (size < 1024.0) return "%.1f %s".format(size, unit)
         }
         return "%.1f PB".format(size)
-    }
-}
-
-class CountLinesTool : BaseMcpTool() {
-    override fun getCategory(): String = "File Operations"
-    override fun getName(): String = "countLines"
-    override fun getDescription(): String = "Fast buffered byte-level line counting. Accepts: path, filePath, file."
-    override fun getOptionalParams(): Map<String, String> = mapOf(
-        "path" to "string", "filePath" to "string", "file" to "string"
-    )
-    override fun getOptionalParamDescriptions(): Map<String, String> = mapOf(
-        "path" to "Absolute or relative path to the file",
-        "filePath" to "Alternative to path",
-        "file" to "Alternative to path"
-    )
-    override suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult {
-        val filePath = getPathParam(args) ?: throw ToolError.MissingParam("path/filePath/file")
-        val file = resolvePathOrThrow(context, filePath)
-
-        var lines = 0L
-        var lastByte = -1
-        val buf = ByteArray(8192)
-        file.inputStream().use { input ->
-            var read = input.read(buf)
-            while (read != -1) {
-                for (i in 0 until read) {
-                    if (buf[i] == 10.toByte()) lines++
-                }
-                if (read > 0) lastByte = buf[read - 1].toInt()
-                read = input.read(buf)
-            }
-        }
-        if (lastByte != -1 && lastByte != 10) lines++
-
-        return McpToolResult.success(JsonObject().apply {
-            addProperty("lines", lines)
-            addProperty("path", file.absolutePath)
-        }.toString())
     }
 }
