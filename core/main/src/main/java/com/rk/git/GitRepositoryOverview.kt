@@ -9,14 +9,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rk.resources.drawables
 import com.rk.resources.strings
-import com.rk.utils.clipboardManager
 import com.rk.utils.toast
 import java.text.SimpleDateFormat
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +49,7 @@ fun RepositoryOverview(
 
     var stashMessage by remember { mutableStateOf("") }
     var stashIncludeUntracked by remember { mutableStateOf(false) }
+    val clipboardManager = LocalClipboardManager.current
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
@@ -297,7 +299,7 @@ fun RepositoryOverview(
                                             style = MaterialTheme.typography.labelSmall,
                                             color = colorScheme.primary.copy(alpha = 0.7f),
                                             modifier = Modifier.clickable {
-                                                clipboardManager?.setText(commit.fullHash)
+                                                clipboardManager.setText(AnnotatedString(commit.fullHash))
                                                 toast(strings.hash_copied)
                                             },
                                         )

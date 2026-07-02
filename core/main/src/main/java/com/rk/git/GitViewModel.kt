@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.rk.resources.getString
 import com.rk.resources.strings
 import com.rk.settings.Settings
 import com.rk.settings.app.InbuiltFeatures
@@ -314,11 +315,12 @@ class GitViewModel : ViewModel() {
                     }
                 }
             } catch (e: TransportException) {
-                val msg = if (isAuthError(e)) strings.git_auth_error else e.message
+                val msg = (if (isAuthError(e)) strings.git_auth_error.getString() else e.message) ?: "Pull failed"
                 withContext(Dispatchers.Main) { errorMessage = msg }
                 if (isAuthError(e)) toast(strings.git_auth_error) else toast(e.message)
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { errorMessage = e.message }
+                val msg = e.message ?: "Pull failed"
+                withContext(Dispatchers.Main) { errorMessage = msg }
                 toast(e.message)
             } finally {
                 withContext(Dispatchers.Main) {
@@ -361,11 +363,12 @@ class GitViewModel : ViewModel() {
                     }
                 }
             } catch (e: TransportException) {
-                val msg = if (isAuthError(e)) strings.git_auth_error else e.message
+                val msg = (if (isAuthError(e)) strings.git_auth_error.getString() else e.message) ?: "Fetch failed"
                 withContext(Dispatchers.Main) { errorMessage = msg }
                 if (isAuthError(e)) toast(strings.git_auth_error) else toast(e.message)
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { errorMessage = e.message }
+                val msg = e.message ?: "Fetch failed"
+                withContext(Dispatchers.Main) { errorMessage = msg }
                 toast(e.message)
             } finally {
                 withContext(Dispatchers.Main) {
@@ -529,7 +532,7 @@ class GitViewModel : ViewModel() {
         return try {
             Git.open(currentRoot.value).use { git ->
                 git.remoteList().call().map { remote ->
-                    val url = remote.urLs.firstOrNull()?.toString() ?: ""
+                    val url = remote.uris.firstOrNull()?.toString() ?: ""
                     Pair(remote.name, url)
                 }
             }
