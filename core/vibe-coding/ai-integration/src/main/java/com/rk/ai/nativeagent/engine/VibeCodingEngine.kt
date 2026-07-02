@@ -143,6 +143,8 @@ class VibeCodingEngine(
     val settingsStore = SettingsStore(context, appScope)
 
     private val eventBus = AppEventBus()
+    private val filesManager = FilesManager(context, filesRepo, appScope)
+    private val mcpManager = McpManager(settingsStore, appScope, VibeCodingFileManager(context))
     private val skillManager = SkillManager(context, settingsStore) {
         try { ideService.getPrimaryWorkspacePath() } catch (_: Exception) { "" }
     }

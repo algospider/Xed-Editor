@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rk.resources.drawables
 import com.rk.resources.strings
+import com.rk.settings.Settings
 import com.rk.utils.getGitColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -78,8 +79,32 @@ fun ConflictGroup(
                 color = MaterialTheme.colorScheme.error,
             )
         }
+        // Conflict resolution actions
         AnimatedVisibility(visible = expanded) {
-            ChangesItemList(conflicts, gitViewModel, colorScheme)
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 36.dp, end = 8.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { gitViewModel.abortMerge() },
+                        enabled = !gitViewModel.isLoading,
+                        shape = MaterialTheme.shapes.small,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        modifier = Modifier.height(30.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) {
+                        Text(stringResource(strings.merge_abort), style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text(
+                        "Mark each resolved file by toggling it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                    )
+                }
+                ChangesItemList(conflicts, gitViewModel, colorScheme)
+            }
         }
         Spacer(Modifier.height(4.dp))
     }
@@ -212,14 +237,25 @@ fun ChangesItemList(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { expanded = !expanded }
+                        .clickable {
+                            if (change.type == ChangeType.CONFLICTING) {
+                                gitViewModel.markResolved(change.path)
+                            } else {
+                                expanded = !expanded
+                            }
+                        }
                         .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Checkbox(
                         enabled = !gitViewModel.isLoading,
                         checked = change.isChecked,
-                        onCheckedChange = { gitViewModel.toggleChange(change) },
+                        onCheckedChange = {
+                            gitViewModel.toggleChange(change)
+                            if (change.type == ChangeType.CONFLICTING) {
+                                gitViewModel.markResolved(change.path)
+                            }
+                        },
                         modifier = Modifier.size(20.dp),
                     )
 
@@ -248,10 +284,10 @@ fun ChangesItemList(
                         modifier = Modifier.widthIn(max = 120.dp),
                     )
 
-                    if (!isStaged) {
+                    if (!isStaged && change.type != ChangeType.CONFLICTING) {
                         IconButton(
                             onClick = { showDiscardConfirmDialog = change },
-                            enabled = !gitViewModel.isLoading,
+                            enabled = !gitViewModel.isCheckingOut,
                             modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
@@ -260,6 +296,24 @@ fun ChangesItemList(
                                 tint = colorScheme.error.copy(alpha = 0.7f),
                                 modifier = Modifier.size(16.dp)
                             )
+                        }
+
+                        // Stash individual file button (only for unstaged modified)
+                        if (change.type == ChangeType.MODIFIED && !isStaged) {
+                            IconButton(
+                                onClick = {
+                                    gitViewModel.stashChanges("stash: ${change.path}")
+                                },
+                                enabled = !gitViewModel.isStashing,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(drawables.commit),
+                                    contentDescription = "Stash this file",
+                                    tint = colorScheme.primary.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
                         }
                     }
 

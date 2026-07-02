@@ -25,6 +25,7 @@ import org.eclipse.jgit.lib.Constants
 import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.lib.SubmoduleConfig.FetchRecurseSubmodulesMode
 import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.transport.RemoteConfig
 import org.eclipse.jgit.transport.RemoteRefUpdate
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 
@@ -64,6 +65,17 @@ class GitViewModel : ViewModel() {
     var amends = mutableStateMapOf<String, Boolean>()
 
     var isLoading by mutableStateOf(false)
+    var isPulling by mutableStateOf(false)
+    var isPushing by mutableStateOf(false)
+    var isCommitting by mutableStateOf(false)
+    var isCheckingOut by mutableStateOf(false)
+    var isFetching by mutableStateOf(false)
+    var isStashing by mutableStateOf(false)
+
+    // Panel-level error message (replaces bare toasts)
+    var errorMessage by mutableStateOf<String?>(null)
+
+    fun clearError() { errorMessage = null }
 
     private val syncJobs = ConcurrentHashMap<String, Job>()
     private val gitRootCache = ConcurrentHashMap<String, String>()
@@ -153,7 +165,7 @@ class GitViewModel : ViewModel() {
 
     fun discardChange(change: GitChange) {
         viewModelScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) { isLoading = true }
+            withContext(Dispatchers.Main) { isCheckingOut = true; isLoading = true }
             try {
                 if (change.type == ChangeType.UNTRACKED) {
                     val file = File(change.path)
@@ -170,7 +182,7 @@ class GitViewModel : ViewModel() {
             } catch (e: Exception) {
                 toast(e.message)
             } finally {
-                withContext(Dispatchers.Main) { isLoading = false }
+                withContext(Dispatchers.Main) { isCheckingOut = false; isLoading = false }
             }
         }
     }
@@ -233,7 +245,7 @@ class GitViewModel : ViewModel() {
 
     fun checkout(branchName: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) { isLoading = true }
+            withContext(Dispatchers.Main) { isCheckingOut = true; isLoading = true }
             var success = false
             try {
                 Git.open(currentRoot.value).use { git ->
@@ -259,7 +271,7 @@ class GitViewModel : ViewModel() {
                 toast(e.message)
             } finally {
                 withContext(Dispatchers.Main) {
-                    isLoading = false
+                    isCheckingOut = false; isLoading = false
                     if (success) {
                         toast(strings.checkout_complete)
                         currentRoot.value?.let { syncChanges(it) }
@@ -271,7 +283,7 @@ class GitViewModel : ViewModel() {
 
     fun pull(): Job {
         return viewModelScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) { isLoading = true }
+            withContext(Dispatchers.Main) { isPulling = true; isLoading = true }
             var success = false
             try {
                 Git.open(currentRoot.value).use { git ->
@@ -285,7 +297,7 @@ class GitViewModel : ViewModel() {
                     if (pullResult.isSuccessful) {
                         success = true
                     } else {
-                        val errorMessage = buildString {
+                        val errorMsg = buildString {
                             pullResult.mergeResult?.let { mergeResult ->
                                 append("Merge status: ${mergeResult.mergeStatus}")
                                 if (!mergeResult.mergeStatus.isSuccessful) {
@@ -297,17 +309,24 @@ class GitViewModel : ViewModel() {
                                 append("Rebase status: ${rebaseResult.status}")
                             }
                         }
-                        toast(errorMessage)
+                        withContext(Dispatchers.Main) { errorMessage = errorMsg }
+                        toast(errorMsg)
                     }
                 }
             } catch (e: TransportException) {
+                val msg = if (isAuthError(e)) strings.git_auth_error else e.message
+                withContext(Dispatchers.Main) { errorMessage = msg }
                 if (isAuthError(e)) toast(strings.git_auth_error) else toast(e.message)
             } catch (e: Exception) {
+                withContext(Dispatchers.Main) { errorMessage = e.message }
                 toast(e.message)
             } finally {
                 withContext(Dispatchers.Main) {
-                    isLoading = false
-                    if (success) toast(strings.pull_complete)
+                    isPulling = false; isLoading = false
+                    if (success) {
+                        toast(strings.pull_complete)
+                        currentRoot.value?.let { syncChanges(it) }
+                    }
                 }
             }
         }
@@ -315,10 +334,11 @@ class GitViewModel : ViewModel() {
 
     fun fetch() {
         viewModelScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) { isLoading = true }
+            withContext(Dispatchers.Main) { isFetching = true; isLoading = true }
+            var success = false
             try {
                 Git.open(currentRoot.value).use { git ->
-                    git.fetch()
+                    val result = git.fetch()
                         .setRemote(GIT_ORIGIN)
                         .setCredentialsProvider(
                             UsernamePasswordCredentialsProvider(Settings.git_username, Settings.git_password)
@@ -333,15 +353,24 @@ class GitViewModel : ViewModel() {
                         .setCheckFetchedObjects(true)
                         .setRemoveDeletedRefs(true)
                         .call()
+                    success = true
+                    val messages = result.messages
+                    if (messages.isNotEmpty()) {
+                        @Suppress("UNUSED_EXPRESSION")
+                        messages
+                    }
                 }
             } catch (e: TransportException) {
+                val msg = if (isAuthError(e)) strings.git_auth_error else e.message
+                withContext(Dispatchers.Main) { errorMessage = msg }
                 if (isAuthError(e)) toast(strings.git_auth_error) else toast(e.message)
             } catch (e: Exception) {
+                withContext(Dispatchers.Main) { errorMessage = e.message }
                 toast(e.message)
             } finally {
                 withContext(Dispatchers.Main) {
-                    isLoading = false
-                    toast(strings.fetch_complete)
+                    isFetching = false; isLoading = false
+                    if (success) toast(strings.fetch_complete)
                 }
             }
         }
@@ -406,7 +435,7 @@ class GitViewModel : ViewModel() {
 
     fun commit(): Job {
         return viewModelScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) { isLoading = true }
+            withContext(Dispatchers.Main) { isCommitting = true; isLoading = true }
             try {
                 Git.open(currentRoot.value).use { git ->
                     val rootPath = currentRoot.value?.absolutePath ?: return@use
@@ -433,7 +462,7 @@ class GitViewModel : ViewModel() {
                 toast(e.message)
             } finally {
                 withContext(Dispatchers.Main) {
-                    isLoading = false
+                    isCommitting = false; isLoading = false
                     currentRoot.value?.let { syncChanges(it) }
                 }
             }
@@ -466,9 +495,116 @@ class GitViewModel : ViewModel() {
         }
     }
 
-    fun push(force: Boolean) {
+    data class AheadBehind(val ahead: Int, val behind: Int)
+
+    fun getRemoteAheadBehind(): AheadBehind? {
+        return try {
+            Git.open(currentRoot.value).use { git ->
+                val repo = git.repository
+                val branch = repo.branch ?: return null
+                val localRef = repo.findRef(BRANCH_PREFIX + branch) ?: return null
+                val remoteRef = repo.findRef("$REMOTE_PREFIX$GIT_ORIGIN/$branch") ?: return AheadBehind(0, 0)
+                RevWalk(repo).use { walk ->
+                    val localCommit = walk.parseCommit(localRef.objectId)
+                    val remoteCommit = walk.parseCommit(remoteRef.objectId)
+
+                    walk.markStart(localCommit)
+                    walk.markUninteresting(remoteCommit)
+                    val ahead = walk.count()
+
+                    walk.reset()
+                    walk.markStart(remoteCommit)
+                    walk.markUninteresting(localCommit)
+                    val behind = walk.count()
+
+                    AheadBehind(ahead, behind)
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun getRemotes(): List<Pair<String, String>> {
+        return try {
+            Git.open(currentRoot.value).use { git ->
+                git.remoteList().call().map { remote ->
+                    val url = remote.urLs.firstOrNull()?.toString() ?: ""
+                    Pair(remote.name, url)
+                }
+            }
+        } catch (e: Exception) {
+            toast(e.message); emptyList()
+        }
+    }
+
+    fun addRemote(name: String, url: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Git.open(currentRoot.value).use { git ->
+                    git.remoteAdd().setName(name).setUri(org.eclipse.jgit.transport.URIish(url)).call()
+                }
+                toast("Remote '$name' added")
+            } catch (e: Exception) {
+                toast(e.message)
+            }
+        }
+    }
+
+    fun removeRemote(name: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Git.open(currentRoot.value).use { git ->
+                    git.remoteRemove().setRemoteName(name).call()
+                }
+                toast("Remote '$name' removed")
+            } catch (e: Exception) {
+                toast(e.message)
+            }
+        }
+    }
+
+    fun abortMerge() {
         viewModelScope.launch(Dispatchers.IO) {
             withContext(Dispatchers.Main) { isLoading = true }
+            try {
+                Git.open(currentRoot.value).use { git ->
+                    val repo = git.repository
+                    val mergeDir = File(repo.directory.parentFile, "MERGE_HEAD")
+                    if (mergeDir.exists()) mergeDir.delete()
+                    val mergeMsgDir = File(repo.directory.parentFile, "MERGE_MSG")
+                    if (mergeMsgDir.exists()) mergeMsgDir.delete()
+                    val cherryPickHead = File(repo.directory.parentFile, "CHERRY_PICK_HEAD")
+                    if (cherryPickHead.exists()) cherryPickHead.delete()
+                    // Reset index to HEAD
+                    git.reset().setMode(org.eclipse.jgit.api.ResetCommand.ResetType.HARD).call()
+                }
+                toast(strings.merge_aborted)
+                currentRoot.value?.let { syncChanges(it) }
+            } catch (e: Exception) {
+                toast(e.message)
+            } finally {
+                withContext(Dispatchers.Main) { isLoading = false }
+            }
+        }
+    }
+
+    fun markResolved(filePath: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Git.open(currentRoot.value).use { git ->
+                    git.add().addFilepattern(filePath).call()
+                }
+                currentRoot.value?.let { syncChanges(it) }
+            } catch (e: Exception) {
+                toast(e.message)
+            }
+        }
+    }
+
+    fun push(force: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) { isPushing = true; isLoading = true }
             try {
                 Git.open(currentRoot.value).use { git ->
                     val pushResults =
@@ -505,14 +641,14 @@ class GitViewModel : ViewModel() {
             } catch (e: Exception) {
                 toast(e.message)
             } finally {
-                withContext(Dispatchers.Main) { isLoading = false }
+                withContext(Dispatchers.Main) { isPushing = false; isLoading = false }
             }
         }
     }
 
     fun checkoutNew(branchName: String, branchBase: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) { isLoading = true }
+            withContext(Dispatchers.Main) { isCheckingOut = true; isLoading = true }
             var success = false
             try {
                 Git.open(currentRoot.value).use { git ->
@@ -531,7 +667,7 @@ class GitViewModel : ViewModel() {
                 toast(e.message)
             } finally {
                 withContext(Dispatchers.Main) {
-                    isLoading = false
+                    isCheckingOut = false; isLoading = false
                     if (success) {
                         toast(strings.checkout_complete)
                         currentRoot.value?.let { root ->
@@ -548,15 +684,18 @@ class GitViewModel : ViewModel() {
     }
 
     // Git Stash operations
-    fun stashChanges(message: String? = null) {
+    fun stashChanges(message: String? = null, includeUntracked: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) { isLoading = true }
+            withContext(Dispatchers.Main) { isStashing = true; isLoading = true }
             try {
                 Git.open(currentRoot.value).use { git ->
                     val stashCommand = git.stashCreate()
                     if (!message.isNullOrBlank()) {
                         stashCommand.setRef("refs/stash")
                         stashCommand.setWorkingDirectoryMessage(message)
+                    }
+                    if (includeUntracked) {
+                        stashCommand.setIncludeUntracked(true)
                     }
                     stashCommand.call()
                     toast("Changes stashed")
@@ -566,7 +705,7 @@ class GitViewModel : ViewModel() {
             } catch (e: Exception) {
                 toast(e.message)
             } finally {
-                withContext(Dispatchers.Main) { isLoading = false }
+                withContext(Dispatchers.Main) { isStashing = false; isLoading = false }
             }
         }
     }

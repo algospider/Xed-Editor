@@ -669,4 +669,27 @@
     <string name="auto_closing_bracket_desc">Automatically insert matching closing bracket</string>
     <string name="confirm_exit_dialog">Confirm exit dialog</string>
     <string name="confirm_exit_dialog_desc">Show a confirmation dialog before closing the app</string>
+    <string name="ahead_of_remote">ahead of \'%1$s\' by %2$d</string>
+    <string name="behind_remote">behind \'%1$s\' by %2$d</string>
+    <string name="ahead_behind_remote">ahead of \'%1$s\' by %2$d, behind by %3$d</string>
+    <string name="up_to_date">up to date</string>
+    <string name="push_confirm_title">Push commits</string>
+    <string name="push_confirm_message">You are about to push to \'%1$s\'. Continue?</string>
+    <string name="force_push">Force push</string>
+    <string name="merge_abort">Abort merge</string>
+    <string name="merge_aborted">Merge aborted</string>
+    <string name="mark_resolved">Mark as resolved</string>
+    <string name="remotes">Remotes</string>
+    <string name="remote_name">Remote name</string>
+    <string name="remote_url">Remote URL</string>
+    <string name="add_remote">Add remote</string>
+    <string name="remove_remote">Remove remote</string>
+    <string name="confirm_remove_remote">Are you sure you want to remove the remote \'%s\'?</string>
+    <string name="stash_changes">Stash changes</string>
+    <string name="stash_include_untracked">Include untracked</string>
+    <string name="copy_hash">Copy hash</string>
+    <string name="hash_copied">Hash copied to clipboard</string>
+    <string name="loading">Loading…</string>
+    <string name="commits_count">%d commits</string>
+    <string name="branches_count">%d branches</string>
 </resources>

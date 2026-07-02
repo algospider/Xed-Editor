@@ -1,5 +1,6 @@
 package com.rk.git
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -15,7 +16,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rk.resources.drawables
 import com.rk.resources.strings
+import com.rk.utils.clipboardManager
+import com.rk.utils.toast
 import java.text.SimpleDateFormat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Date
 import java.util.Locale
 
@@ -27,18 +33,21 @@ fun RepositoryOverview(
     val commitLog = gitViewModel.commitLog
     val branchCount = remember { derivedStateOf { gitViewModel.getBranchList().size } }
     val commitCount = remember { derivedStateOf { gitViewModel.getCommitCount() } }
+    val aheadBehind = remember { mutableStateOf<GitViewModel.AheadBehind?>(null) }
+
+    LaunchedEffect(gitViewModel.currentRoot.value, gitViewModel.currentBranch) {
+        if (gitViewModel.currentRoot.value != null) {
+            gitViewModel.loadStashList()
+            aheadBehind.value = withContext(Dispatchers.IO) { gitViewModel.getRemoteAheadBehind() }
+        }
+    }
 
     val changesList = gitViewModel.currentRoot.value?.absolutePath?.let { gitViewModel.changes[it] } ?: emptyList()
     val hasChanges = changesList.isNotEmpty()
     val stashes = gitViewModel.stashList.value
 
     var stashMessage by remember { mutableStateOf("") }
-
-    LaunchedEffect(gitViewModel.currentRoot.value) {
-        if (gitViewModel.currentRoot.value != null) {
-            gitViewModel.loadStashList()
-        }
-    }
+    var stashIncludeUntracked by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
@@ -60,16 +69,38 @@ fun RepositoryOverview(
                         color = colorScheme.onSurface,
                     )
                     Spacer(Modifier.width(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = colorScheme.primaryContainer.copy(alpha = 0.5f),
-                    ) {
-                        Text(
-                            "up to date",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colorScheme.onPrimaryContainer,
-                        )
+                    val syncStatus = aheadBehind.value
+                    val statusLabel = when {
+                        syncStatus == null -> ""
+                        syncStatus.ahead > 0 && syncStatus.behind > 0 ->
+                            stringResource(strings.ahead_behind_remote, "origin", syncStatus.ahead, syncStatus.behind)
+                        syncStatus.ahead > 0 ->
+                            stringResource(strings.ahead_of_remote, "origin", syncStatus.ahead)
+                        syncStatus.behind > 0 ->
+                            stringResource(strings.behind_remote, "origin", syncStatus.behind)
+                        else -> stringResource(strings.up_to_date)
+                    }
+                    val statusColor = when {
+                        syncStatus == null -> colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        syncStatus.ahead > 0 -> colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+                        syncStatus.behind > 0 -> colorScheme.errorContainer.copy(alpha = 0.5f)
+                        else -> colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    }
+                    val statusTextColor = when {
+                        syncStatus == null -> colorScheme.onPrimaryContainer
+                        syncStatus.ahead > 0 -> colorScheme.onTertiaryContainer
+                        syncStatus.behind > 0 -> colorScheme.onErrorContainer
+                        else -> colorScheme.onPrimaryContainer
+                    }
+                    if (statusLabel.isNotEmpty()) {
+                        Surface(shape = RoundedCornerShape(4.dp), color = statusColor) {
+                            Text(
+                                statusLabel,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = statusTextColor,
+                            )
+                        }
                     }
                 }
 
@@ -117,16 +148,34 @@ fun RepositoryOverview(
                         )
                         Button(
                             onClick = {
-                                gitViewModel.stashChanges(stashMessage)
+                                gitViewModel.stashChanges(stashMessage, stashIncludeUntracked)
                                 stashMessage = ""
+                                stashIncludeUntracked = false
                             },
-                            enabled = !gitViewModel.isLoading,
+                            enabled = !gitViewModel.isStashing,
                             shape = MaterialTheme.shapes.medium,
                             modifier = Modifier.height(48.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp)
                         ) {
                             Text("Stash", style = MaterialTheme.typography.labelMedium)
                         }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().height(24.dp).clickable { stashIncludeUntracked = !stashIncludeUntracked },
+                    ) {
+                        Checkbox(
+                            checked = stashIncludeUntracked,
+                            onCheckedChange = { stashIncludeUntracked = it },
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            stringResource(strings.stash_include_untracked),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
 
@@ -178,7 +227,7 @@ fun RepositoryOverview(
                                 ) {
                                     TextButton(
                                         onClick = { gitViewModel.applyStash(stash.index) },
-                                        enabled = !gitViewModel.isLoading,
+                                        enabled = !gitViewModel.isStashing,
                                         contentPadding = PaddingValues(horizontal = 8.dp),
                                         modifier = Modifier.height(28.dp)
                                     ) {
@@ -187,7 +236,7 @@ fun RepositoryOverview(
 
                                     TextButton(
                                         onClick = { gitViewModel.popStash(stash.index) },
-                                        enabled = !gitViewModel.isLoading,
+                                        enabled = !gitViewModel.isStashing,
                                         contentPadding = PaddingValues(horizontal = 8.dp),
                                         modifier = Modifier.height(28.dp)
                                     ) {
@@ -196,7 +245,7 @@ fun RepositoryOverview(
 
                                     IconButton(
                                         onClick = { gitViewModel.dropStash(stash.index) },
-                                        enabled = !gitViewModel.isLoading,
+                                        enabled = !gitViewModel.isStashing,
                                         modifier = Modifier.size(28.dp)
                                     ) {
                                         Icon(
@@ -222,6 +271,7 @@ fun RepositoryOverview(
                     )
                     Spacer(Modifier.height(8.dp))
 
+                    val scope = rememberCoroutineScope()
                     commitLog.value.take(5).forEach { commit ->
                         Surface(
                             shape = MaterialTheme.shapes.small,
@@ -246,6 +296,10 @@ fun RepositoryOverview(
                                             commit.hash,
                                             style = MaterialTheme.typography.labelSmall,
                                             color = colorScheme.primary.copy(alpha = 0.7f),
+                                            modifier = Modifier.clickable {
+                                                clipboardManager?.setText(commit.fullHash)
+                                                toast(strings.hash_copied)
+                                            },
                                         )
                                         Spacer(Modifier.width(8.dp))
                                         Text(

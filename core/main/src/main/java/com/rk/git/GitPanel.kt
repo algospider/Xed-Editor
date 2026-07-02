@@ -1,5 +1,6 @@
 package com.rk.git
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,6 +11,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rk.activities.main.MainActivity
 import com.rk.filetree.FileTreeTab
@@ -18,6 +21,7 @@ import com.rk.resources.drawables
 import com.rk.resources.strings
 import com.rk.tabs.editor.EditorTab
 import com.rk.utils.findGitRoot
+import com.rk.utils.toast
 import java.io.File
 import kotlinx.coroutines.launch
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder
@@ -34,6 +38,9 @@ fun GitPanel(
     var showNewBranchDialog by remember { mutableStateOf(false) }
     var newBranch by remember { mutableStateOf("") }
     var newBranchError by remember { mutableStateOf<String?>(null) }
+    var showPushDialog by remember { mutableStateOf(false) }
+    var pushForce by remember { mutableStateOf(false) }
+    var showRemoteDialog by remember { mutableStateOf(false) }
     val invalidBranchMsg = stringResource(strings.value_invalid)
 
     val gitChanges = gitViewModel.currentRoot.value?.absolutePath?.let { gitViewModel.changes[it] } ?: emptyList()
@@ -82,14 +89,60 @@ fun GitPanel(
                     }
                 },
                 onFetch = { gitViewModel.fetch() },
-                onPush = { gitViewModel.push(false) },
+                onPush = { showPushDialog = true },
                 onRefresh = onRefresh,
+                onManageRemotes = { showRemoteDialog = true },
             )
 
             HorizontalDivider(color = colorScheme.outlineVariant.copy(alpha = 0.1f), thickness = 0.5.dp)
 
-            if (gitViewModel.isLoading) {
+            // Operation-specific loading bar
+            val loadingOp = when {
+                gitViewModel.isPulling -> "Pulling..."
+                gitViewModel.isPushing -> "Pushing..."
+                gitViewModel.isCommitting -> "Committing..."
+                gitViewModel.isCheckingOut -> "Checking out..."
+                gitViewModel.isFetching -> "Fetching..."
+                gitViewModel.isStashing -> "Stashing..."
+                else -> null
+            }
+            if (loadingOp != null) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp))
+            } else if (gitViewModel.isLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp))
+            }
+
+            // Error banner with dismiss
+            val errorMsg = gitViewModel.errorMessage
+            if (errorMsg != null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                    shape = MaterialTheme.shapes.small,
+                    color = colorScheme.errorContainer.copy(alpha = 0.6f),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = errorMsg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            onClick = { gitViewModel.clearError() },
+                            modifier = Modifier.size(20.dp),
+                        ) {
+                            Icon(
+                                painter = painterResource(drawables.close),
+                                contentDescription = "Dismiss",
+                                tint = colorScheme.onErrorContainer,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                }
             }
 
             if (gitChanges.isNotEmpty()) {
@@ -149,14 +202,14 @@ fun GitPanel(
                 amend = amend,
                 commitMessage = commitMessage,
                 hasCheckedChanges = hasCheckedChanges,
-                isLoading = gitViewModel.isLoading,
+                isLoading = gitViewModel.isCommitting,
                 onToggleAmend = { gitViewModel.toggleAmend(it) },
                 onChangeCommitMessage = { gitViewModel.changeCommitMessage(it) },
                 onCommit = { gitViewModel.commit() },
                 onCommitAndPush = {
                     scope.launch {
                         gitViewModel.commit().join()
-                        gitViewModel.push(false)
+                        showPushDialog = true
                     }
                 },
             )
@@ -185,6 +238,201 @@ fun GitPanel(
             },
         )
     }
+
+    if (showPushDialog) {
+        PushConfirmationDialog(
+            remoteName = "origin",
+            onConfirm = { force ->
+                gitViewModel.push(force)
+                showPushDialog = false
+                pushForce = false
+            },
+            onDismiss = {
+                showPushDialog = false
+                pushForce = false
+            },
+        )
+    }
+
+    if (showRemoteDialog) {
+        ManageRemotesDialog(
+            gitViewModel = gitViewModel,
+            onDismiss = { showRemoteDialog = false },
+        )
+    }
+}
+
+@Composable
+fun ManageRemotesDialog(
+    gitViewModel: GitViewModel,
+    onDismiss: () -> Unit,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    var remotes by remember { mutableStateOf(gitViewModel.getRemotes()) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var newRemoteName by remember { mutableStateOf("") }
+    var newRemoteUrl by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(painterResource(drawables.git), contentDescription = null, tint = colorScheme.primary) },
+        title = { Text(stringResource(strings.remotes)) },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 300.dp)) {
+                if (remotes.isEmpty()) {
+                    Text(
+                        "No remotes configured",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    remotes.forEach { (name, url) ->
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = colorScheme.surfaceContainerLow,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        name,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        url,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        gitViewModel.removeRemote(name)
+                                        remotes = gitViewModel.getRemotes()
+                                    },
+                                    modifier = Modifier.size(28.dp),
+                                ) {
+                                    Icon(
+                                        painter = painterResource(drawables.close),
+                                        contentDescription = stringResource(strings.remove_remote),
+                                        tint = colorScheme.error.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                TextButton(
+                    onClick = { showAddDialog = true },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text(stringResource(strings.add_remote), color = colorScheme.primary)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(android.R.string.ok))
+            }
+        },
+    )
+
+    if (showAddDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text(stringResource(strings.add_remote)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = newRemoteName,
+                        onValueChange = { newRemoteName = it },
+                        label = { Text(stringResource(strings.remote_name)) },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
+                    )
+                    OutlinedTextField(
+                        value = newRemoteUrl,
+                        onValueChange = { newRemoteUrl = it },
+                        label = { Text(stringResource(strings.remote_url)) },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newRemoteName.isNotBlank() && newRemoteUrl.isNotBlank(),
+                    onClick = {
+                        gitViewModel.addRemote(newRemoteName, newRemoteUrl)
+                        remotes = gitViewModel.getRemotes()
+                        newRemoteName = ""
+                        newRemoteUrl = ""
+                        showAddDialog = false
+                    },
+                ) {
+                    Text(stringResource(strings.add_remote))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) {
+                    Text(stringResource(strings.cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+fun PushConfirmationDialog(
+    remoteName: String,
+    onConfirm: (force: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var force by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(painterResource(drawables.push), contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        title = { Text(stringResource(strings.push_confirm_title)) },
+        text = {
+            Column {
+                Text(stringResource(strings.push_confirm_message, remoteName))
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().height(32.dp).clickable { force = !force },
+                ) {
+                    Checkbox(checked = force, onCheckedChange = { force = it }, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        stringResource(strings.force_push),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(force) }) {
+                Text(
+                    if (force) stringResource(strings.push_confirm_title) else stringResource(strings.push),
+                    color = if (force) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(strings.cancel))
+            }
+        },
+    )
 }
 
 @Composable

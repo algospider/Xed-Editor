@@ -25,6 +25,7 @@ fun GitBranchHeader(
     onFetch: () -> Unit,
     onPush: () -> Unit,
     onRefresh: () -> Unit,
+    onManageRemotes: (() -> Unit)? = null,
 ) {
     val colorScheme = MaterialTheme.colorScheme
 
@@ -73,21 +74,27 @@ fun GitBranchHeader(
         }
 
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            CompactGitIconButton(onClick = onPull, enabled = !gitViewModel.isLoading) {
+            CompactGitIconButton(onClick = onPull, enabled = !gitViewModel.isPulling) {
                 Icon(painterResource(drawables.pull), contentDescription = stringResource(strings.pull), modifier = Modifier.size(18.dp),
                     tint = colorScheme.onSurfaceVariant)
             }
-            CompactGitIconButton(onClick = onFetch, enabled = !gitViewModel.isLoading) {
+            CompactGitIconButton(onClick = onFetch, enabled = !gitViewModel.isFetching) {
                 Icon(painterResource(drawables.fetch), contentDescription = stringResource(strings.fetch), modifier = Modifier.size(18.dp),
                     tint = colorScheme.onSurfaceVariant)
             }
-            CompactGitIconButton(onClick = onPush, enabled = !gitViewModel.isLoading) {
+            CompactGitIconButton(onClick = onPush, enabled = !gitViewModel.isPushing) {
                 Icon(painterResource(drawables.push), contentDescription = stringResource(strings.push), modifier = Modifier.size(18.dp),
                     tint = colorScheme.onSurfaceVariant)
             }
             CompactGitIconButton(onClick = onRefresh, enabled = !gitViewModel.isLoading) {
                 Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", modifier = Modifier.size(18.dp),
                     tint = colorScheme.onSurfaceVariant)
+            }
+            if (onManageRemotes != null) {
+                CompactGitIconButton(onClick = onManageRemotes, enabled = !gitViewModel.isLoading) {
+                    Icon(painterResource(drawables.git), contentDescription = "Remotes", modifier = Modifier.size(16.dp),
+                        tint = colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                }
             }
         }
     }
