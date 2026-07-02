@@ -689,7 +689,6 @@
     <string name="stash_include_untracked">Include untracked</string>
     <string name="copy_hash">Copy hash</string>
     <string name="hash_copied">Hash copied to clipboard</string>
-    <string name="loading">Loading…</string>
     <string name="commits_count">%d commits</string>
     <string name="branches_count">%d branches</string>
 </resources>
