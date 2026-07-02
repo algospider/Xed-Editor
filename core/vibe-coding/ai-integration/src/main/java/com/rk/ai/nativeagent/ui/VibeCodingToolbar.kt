@@ -212,8 +212,8 @@ private fun ModelBadge(
 @Composable
 private fun ToolbarDivider(colorScheme: ColorScheme) {
     Spacer(Modifier.width(2.dp))
-    HorizontalDivider(
-        modifier = Modifier.height(16.dp).width(1.dp),
+    VerticalDivider(
+        modifier = Modifier.height(16.dp),
         color = colorScheme.outlineVariant.copy(alpha = 0.3f),
     )
     Spacer(Modifier.width(2.dp))

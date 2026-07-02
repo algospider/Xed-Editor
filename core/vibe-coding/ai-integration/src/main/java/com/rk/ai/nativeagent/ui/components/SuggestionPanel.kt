@@ -38,7 +38,7 @@ fun SuggestionPanel(
                 Text("Suggestions", style = MaterialTheme.typography.titleMedium)
                 IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
             }
-            Divider()
+            HorizontalDivider()
             if (suggestions.value.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("No suggestions available", style = MaterialTheme.typography.bodyMedium)
