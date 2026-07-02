@@ -81,6 +81,11 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -638,7 +643,7 @@ class VibeCodingEngine(
                                     putJsonObject("tool") { put("type", "string"); put("description", "Tool name to call") }
                                     putJsonObject("args") { put("type", "object"); put("description", "Arguments for the tool") }
                                 }
-                                putJsonArray("required") { add(kotlinx.serialization.json.JsonPrimitive("tool")); add(kotlinx.serialization.json.JsonPrimitive("args")) }
+                                putJsonArray("required") { add(JsonPrimitive("tool")); add(JsonPrimitive("args")) }
                             }
                         }
                     },
