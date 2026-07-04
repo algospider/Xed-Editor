@@ -1,6 +1,7 @@
 package com.rk.ai
 
 import android.app.Activity
+import androidx.lifecycle.Lifecycle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -170,14 +171,14 @@ fun UnifiedToolSheet(
     }
 
     val act = activity
-    DisposableEffect(act) {
+    DisposableEffect(Unit) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_DESTROY && act?.isChangingConfigurations != true) {
                 VibeCodingProvider.engineRef.getAndSet(null)?.dispose()
             }
         }
-        act?.lifecycle?.addObserver(observer)
-        onDispose { act?.lifecycle?.removeObserver(observer) }
+        (act as? androidx.lifecycle.LifecycleOwner)?.lifecycle?.addObserver(observer)
+        onDispose { (act as? androidx.lifecycle.LifecycleOwner)?.lifecycle?.removeObserver(observer) }
     }
 
     // Engine lifecycle managed via remember + DisposableEffect above
