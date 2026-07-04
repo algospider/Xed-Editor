@@ -17,31 +17,38 @@ class VibeCodingDiffTools(private val ideService: IdeService) {
 
     private val openDiff = Tool(
         name = "openDiff",
-        description = "Opens a side-by-side diff view for user review.",
+        description = "Open a side-by-side diff view for user review. " +
+            "Use BEFORE writeFile/editFile for high-risk changes to get user confirmation. " +
+            "Shows old vs new content for the user to approve/reject. " +
+            "Example: {\"filePath\": \"src/main.kt\", \"newContent\": \"updated file content...\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("filePath") { put("type", "string"); put("description", "Absolute path to the file") }
-                    putJsonObject("newContent") { put("type", "string"); put("description", "Proposed new content to diff against") }
+                    putJsonObject("newContent") { put("type", "string"); put("description", "Proposed new content to show in diff") }
                 },
                 required = listOf("filePath", "newContent"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing filePath"))
-            val newContent = obj["newContent"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing newContent"))
+            val filePath = obj["filePath"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath'."))
+            val newContent = obj["newContent"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'newContent'."))
             val file = ideService.resolvePath(filePath)
-            if (file == null || !file.exists()) return@Tool listOf(UIMessagePart.Text("File not found: $filePath"))
+            if (file == null || !file.exists()) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: $filePath"))
             val oldContent = ideService.getFileContent(filePath, null, null) ?: ""
             ideService.showPatch(filePath, oldContent, newContent, "Review AI file change") { }
-            listOf(UIMessagePart.Text("Diff opened for $filePath"))
+            listOf(UIMessagePart.Text("OK Diff opened for $filePath (waiting for user review)"))
         },
     )
 
     private val getDiffResult = Tool(
         name = "getDiffResult",
-        description = "Returns the current file content after a diff review.",
+        description = "Get file content AFTER user reviewed a diff. " +
+            "Use after openDiff to check what the user approved. " +
+            "Example: {\"filePath\": \"src/main.kt\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -51,16 +58,18 @@ class VibeCodingDiffTools(private val ideService: IdeService) {
             )
         },
         execute = { args ->
-            val filePath = args.asJsonObject["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing filePath"))
+            val filePath = args.asJsonObject["filePath"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath'."))
             val content = ideService.getFileContent(filePath, null, null)
-            if (content != null) listOf(UIMessagePart.Text(content))
-            else listOf(UIMessagePart.Text("File not found: $filePath"))
+            listOf(UIMessagePart.Text(content ?: "ERROR: File not found: $filePath"))
         },
     )
 
     private val rejectDiff = Tool(
         name = "rejectDiff",
-        description = "Rejects a pending diff/patch for a file.",
+        description = "Reject/close a pending diff view for a file. " +
+            "Use when the user doesn't want to apply the proposed changes. " +
+            "Example: {\"filePath\": \"src/main.kt\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -70,9 +79,10 @@ class VibeCodingDiffTools(private val ideService: IdeService) {
             )
         },
         execute = { args ->
-            val filePath = args.asJsonObject["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing filePath"))
+            val filePath = args.asJsonObject["filePath"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath'."))
             ideService.rejectPatch(filePath)
-            listOf(UIMessagePart.Text("Rejected patch for $filePath"))
+            listOf(UIMessagePart.Text("OK Rejected patch for $filePath"))
         },
     )
 

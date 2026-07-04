@@ -72,22 +72,63 @@ sealed class VibeCodingError(
 }
 
 fun VibeCodingError.toUserMessage(): String = when (this) {
-    is VibeCodingError.ToolError.NotFound -> "Tool '${toolName}' is not available. Check the tool list."
-    is VibeCodingError.ToolError.ExecutionFailed -> "Tool '${toolName}' failed: ${cause.message}"
-    is VibeCodingError.ToolError.InvalidArgs -> "Invalid arguments for '${toolName}': ${validationErrors.joinToString("; ")}"
-    is VibeCodingError.ToolError.PermissionDenied -> "Permission denied: $reason"
-    is VibeCodingError.ToolError.ValidationError -> "Validation error in '${toolName}': $actual"
-    is VibeCodingError.GenerationError.ModelNotFound -> "Model '$modelId' is not configured. Add it in Settings."
-    is VibeCodingError.GenerationError.ProviderFailed -> "Provider '$providerName' returned an error: ${cause.message}"
-    is VibeCodingError.GenerationError.ContextOverflow -> "Context limit reached ($contextUsed/$contextLimit tokens). Starting a new session may help."
-    is VibeCodingError.GenerationError.DoomLoopDetected -> "I noticed a loop calling '$toolName'. Trying a different approach."
-    is VibeCodingError.SecurityError.Blocked -> "Blocked for security: $pattern ($severity)"
-    is VibeCodingError.SecurityError.Warning -> "Security warning: $pattern ($severity)"
-    is VibeCodingError.FileError.NotFound -> "File '$path' was not found."
-    is VibeCodingError.FileError.ReadFailed -> "Could not read '$path': ${cause.message}"
-    is VibeCodingError.FileError.WriteFailed -> "Could not write '$path': ${cause.message}"
-    is VibeCodingError.ConfigError.ParseError -> "Failed to parse configuration in '$configPath'."
-    is VibeCodingError.AgentError.ExecutionFailed -> "Agent '$agentName' encountered an error: ${cause.message}"
-    is VibeCodingError.AgentError.NotFound -> "Agent '$agentName' is not available."
-    else -> message
+    is VibeCodingError.ToolError.NotFound -> "[RECOVERY] Tool '${toolName}' is not available. Available tools are listed in the system prompt. Check for typos."
+    is VibeCodingError.ToolError.ExecutionFailed -> "[RECOVERY] Tool '${toolName}' failed: ${cause.message}. Try with different parameters or a different tool."
+    is VibeCodingError.ToolError.InvalidArgs -> "[RECOVERY] Invalid arguments for '${toolName}': ${validationErrors.joinToString("; ")}. Check the parameter schema and ensure all required fields are present with correct types."
+    is VibeCodingError.ToolError.PermissionDenied -> "[RECOVERY] Permission denied for '${toolName}': $reason. This tool requires user approval — ask the user to approve it."
+    is VibeCodingError.ToolError.ValidationError -> "[RECOVERY] Schema validation failed for '${toolName}': expected $actual at $schemaPath. Verify argument types match."
+    is VibeCodingError.GenerationError.ModelNotFound -> "[RECOVERY] Model '$modelId' is not configured. Add it in AI Settings → Model Configuration."
+    is VibeCodingError.GenerationError.ProviderFailed -> "[RECOVERY] Provider '$providerName' returned an error: ${cause.message}. Check network or provider API key settings."
+    is VibeCodingError.GenerationError.ContextOverflow -> "[RECOVERY] Context limit reached ($contextUsed/$contextLimit tokens). Try simplifying the request or starting a fresh conversation."
+    is VibeCodingError.GenerationError.DoomLoopDetected -> "[RECOVERY] I noticed a loop calling '$toolName'. Trying a different approach now."
+    is VibeCodingError.GenerationError.MaxCompactionsExceeded -> "[RECOVERY] Max compactions reached ($count). Too much context has accumulated. Consider summarizing and starting fresh."
+    is VibeCodingError.SecurityError.Blocked -> "[RECOVERY] Blocked for security: $pattern ($severity) in tool '$toolName'. Operation not permitted."
+    is VibeCodingError.SecurityError.Warning -> "[RECOVERY] Security warning: $pattern ($severity) in tool '$toolName'. Review the content before proceeding."
+    is VibeCodingError.FileError.NotFound -> "[RECOVERY] File '$path' was not found. Use getProjectStructure or listFiles to verify the path exists, or check for typos."
+    is VibeCodingError.FileError.ReadFailed -> "[RECOVERY] Could not read '$path': ${cause.message}. File may be locked or permissions may be insufficient."
+    is VibeCodingError.FileError.WriteFailed -> "[RECOVERY] Could not write '$path': ${cause.message}. Check if parent directories exist (use createFile first)."
+    is VibeCodingError.FileError.ParseFailed -> "[RECOVERY] Failed to parse '$path': ${cause.message}. Check file format."
+    is VibeCodingError.ConfigError.ParseError -> "[RECOVERY] Failed to parse configuration in '$configPath'. Check for syntax errors."
+    is VibeCodingError.ConfigError.NotFound -> "[RECOVERY] Config not found at '$configPath'. It may have been moved or not yet created."
+    is VibeCodingError.ConfigError.ValidationError -> "[RECOVERY] Config at '$configPath' has invalid field '$field': $reason. Edit the config to fix it."
+    is VibeCodingError.AgentError.ExecutionFailed -> "[RECOVERY] Agent '$agentName' encountered an error: ${cause.message}. Try a simpler request."
+    is VibeCodingError.AgentError.NotFound -> "[RECOVERY] Agent '$agentName' is not available. Use listAgents to see available agents."
+    is VibeCodingError.AgentError.MaxStepsExceeded -> "[RECOVERY] Agent '$agentName' exceeded max steps ($maxSteps). Task too complex — break it into smaller parts."
+    is VibeCodingError.PluginError.LoadFailed -> "[RECOVERY] Plugin '$pluginId' failed to load: ${cause.message}. Check plugin configuration."
+    is VibeCodingError.PluginError.UnsupportedVersion -> "[RECOVERY] Plugin '$pluginId' requires version $version, minimum supported is $minVersion. Update the plugin."
+    is VibeCodingError.PersistenceError.DatabaseError -> "[RECOVERY] Database operation failed: ${cause.message}. Try restarting the app."
+    is VibeCodingError.PersistenceError.SerializationError -> "[RECOVERY] Serialization failed: ${cause.message}. Data may be corrupted."
+    else -> "[RECOVERY] $message"
+}
+
+data class RecoveryHint(
+    val action: String,
+    val message: String,
+    val nextTool: String? = null,
+    val nextArgs: Map<String, Any>? = null,
+)
+
+fun deriveRecoveryHint(toolName: String, errorMessage: String): RecoveryHint? {
+    val msg = errorMessage.lowercase()
+    return when {
+        msg.contains("not found") && toolName in listOf("readFile", "readFiles", "editFile", "writeFile", "deleteFile", "renameFile", "tail", "wc", "stat") ->
+            RecoveryHint("list_directory", "File not found. List the parent directory to verify the path.", "listFiles", mapOf("path" to "/"))
+        msg.contains("multiple matches") ->
+            RecoveryHint("add_context", "Found multiple matches. Add more surrounding lines to oldString or use replaceAll=true.")
+        msg.contains("not found") && toolName in listOf("searchCode", "searchSymbols") ->
+            RecoveryHint("broaden_search", "Search returned nothing. Try a broader term, different case, or check file extensions.")
+        msg.contains("timeout") || msg.contains("timed out") ->
+            RecoveryHint("retry_timeout", "Operation timed out. Try with a smaller scope or increase timeout.")
+        msg.contains("permission") || msg.contains("denied") ->
+            RecoveryHint("check_permissions", "Permission denied. Ensure the file is not read-only and you have access.")
+        msg.contains("network") || msg.contains("connect") || msg.contains("dns") ->
+            RecoveryHint("check_network", "Network error. Check connectivity and retry.")
+        msg.contains("no space") || msg.contains("disk") ->
+            RecoveryHint("free_space", "Disk space issue. Free up space on the device.")
+        toolName == "runCommand" && msg.contains("not found") ->
+            RecoveryHint("install_tool", "Command not found. The tool may need to be installed first.")
+        toolName in listOf("gitCommit", "gitPush", "gitCheckout", "gitBranch") && msg.contains("not a git repository") ->
+            RecoveryHint("init_git", "Not a git repository. Initialize with 'git init' first.")
+        else -> null
+    }
 }

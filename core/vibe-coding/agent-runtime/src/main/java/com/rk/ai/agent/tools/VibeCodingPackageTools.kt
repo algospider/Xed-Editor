@@ -23,94 +23,114 @@ class VibeCodingPackageTools(private val ideService: IdeService) {
 
     private val npmSearch = Tool(
         name = "npm_search",
-        description = "Searches npm registry for packages.",
+        description = "Search the npm registry for JavaScript/TypeScript packages. " +
+            "Returns name, version, description, and publisher. " +
+            "Use when a project uses npm and you need to find a package. " +
+            "Example: {\"query\": \"react\", \"limit\": 5}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("query") { put("type", "string"); put("description", "Package name or search term") }
-                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 10)") }
+                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 10, max: 50)") }
                 },
                 required = listOf("query"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing query"))
+            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'query'."))
             val limit = (obj["limit"]?.asJsonPrimitive?.asInt ?: 10).coerceIn(1, 50)
 
-            val url = "https://registry.npmjs.org/-/v1/search?text=${URLEncoder.encode(query, "UTF-8")}&size=$limit"
-            val json = httpGet(url)
-            val data = JsonParser.parseString(json).asJsonObject
-            val objects = data.getAsJsonArray("objects") ?: JsonArray()
+            try {
+                val url = "https://registry.npmjs.org/-/v1/search?text=${URLEncoder.encode(query, "UTF-8")}&size=$limit"
+                val json = httpGet(url)
+                val data = JsonParser.parseString(json).asJsonObject
+                val objects = data.getAsJsonArray("objects") ?: JsonArray()
 
-            val text = buildString {
-                appendLine("npm search results for: $query")
-                appendLine()
-                objects.forEach { objEntry ->
-                    val pkg = objEntry.asJsonObject?.getAsJsonObject("package") ?: return@forEach
-                    val name = pkg.get("name")?.asString ?: "?"
-                    val version = pkg.get("version")?.asString ?: "?"
-                    val description = pkg.get("description")?.asString ?: ""
-                    val publisher = pkg.getAsJsonObject("publisher")?.get("username")?.asString
-                        ?: pkg.getAsJsonObject("author")?.get("name")?.asString ?: "?"
-                    appendLine("$name@$version")
-                    if (description.isNotBlank()) appendLine("  $description")
-                    appendLine("  Publisher: $publisher")
+                val text = buildString {
+                    appendLine("npm search results for: $query")
                     appendLine()
+                    if (objects.size() == 0) appendLine("No packages found.")
+                    objects.forEach { objEntry ->
+                        val pkg = objEntry.asJsonObject?.getAsJsonObject("package") ?: return@forEach
+                        val name = pkg.get("name")?.asString ?: "?"
+                        val version = pkg.get("version")?.asString ?: "?"
+                        val description = pkg.get("description")?.asString ?: ""
+                        val publisher = pkg.getAsJsonObject("publisher")?.get("username")?.asString
+                            ?: pkg.getAsJsonObject("author")?.get("name")?.asString ?: "?"
+                        appendLine("$name@$version")
+                        if (description.isNotBlank()) appendLine("  $description")
+                        appendLine("  Publisher: $publisher")
+                        appendLine()
+                    }
                 }
+                listOf(UIMessagePart.Text(text))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: npm search failed: ${e.message ?: "unknown"}. SUGGESTION: Check connectivity or try a broader query."))
             }
-            listOf(UIMessagePart.Text(text.ifEmpty { "No packages found for: $query" }))
         },
     )
 
     private val pipSearch = Tool(
         name = "pip_search",
-        description = "Searches PyPI (Python Package Index) for packages.",
+        description = "Search PyPI (Python Package Index) for packages. " +
+            "Returns matching package names from the simple index. " +
+            "Use when a project uses Python and you need to find a package. " +
+            "Example: {\"query\": \"flask\", \"limit\": 5}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("query") { put("type", "string"); put("description", "Package name or search term") }
-                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 10)") }
+                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 10, max: 50)") }
                 },
                 required = listOf("query"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing query"))
+            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'query'."))
             val limit = (obj["limit"]?.asJsonPrimitive?.asInt ?: 10).coerceIn(1, 50)
 
-            val html = httpGet("https://pypi.org/simple/")
-            val lines = html.split("\n")
-                .filter { it.contains(query, ignoreCase = true) }
-                .map { it.replace(Regex("<[^>]*>"), "").trim() }
-                .filter { it.isNotBlank() }
-                .take(limit)
+            try {
+                val html = httpGet("https://pypi.org/simple/")
+                val lines = html.split("\n")
+                    .filter { it.contains(query, ignoreCase = true) }
+                    .map { it.replace(Regex("<[^>]*>"), "").trim() }
+                    .filter { it.isNotBlank() }
+                    .take(limit)
 
-            val text = buildString {
-                appendLine("PyPI packages matching: $query")
-                appendLine()
-                lines.forEach { appendLine("  $it") }
+                val text = buildString {
+                    appendLine("PyPI packages matching: $query")
+                    appendLine()
+                    if (lines.isEmpty()) appendLine("No packages found.")
+                    lines.forEach { appendLine("  $it") }
+                }
+                listOf(UIMessagePart.Text(text.ifEmpty { "No packages found for: $query. SUGGESTION: Try a broader search term." }))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: PyPI search failed: ${e.message ?: "unknown"}. SUGGESTION: Check connectivity."))
             }
-            listOf(UIMessagePart.Text(text.ifEmpty { "No packages found for: $query" }))
         },
     )
 
     private val mavenSearch = Tool(
         name = "maven_search",
-        description = "Searches Maven Central for artifacts.",
+        description = "Search Maven Central for Java/Kotlin artifacts. " +
+            "Returns groupId:artifactId, latest version, and last updated date. " +
+            "Use when a project uses Gradle/Maven and you need to find a library. " +
+            "Example: {\"query\": \"com.google.guava:guava\", \"limit\": 5} " +
+            "Also works: {\"query\": \"kotlinx coroutines\", \"limit\": 3}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("query") { put("type", "string"); put("description", "Search term (groupId:artifactId or name)") }
-                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 10)") }
+                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 10, max: 50)") }
                 },
                 required = listOf("query"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing query"))
+            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'query'."))
             val limit = (obj["limit"]?.asJsonPrimitive?.asInt ?: 10).coerceIn(1, 50)
 
             try {
@@ -122,6 +142,7 @@ class VibeCodingPackageTools(private val ideService: IdeService) {
                 val text = buildString {
                     appendLine("Maven Central results for: $query")
                     appendLine()
+                    if (docs.size() == 0) appendLine("No artifacts found.")
                     docs.forEach { doc ->
                         val docObj = doc.asJsonObject
                         val g = docObj.get("g")?.asString ?: "?"
@@ -139,9 +160,9 @@ class VibeCodingPackageTools(private val ideService: IdeService) {
                         appendLine()
                     }
                 }
-                listOf(UIMessagePart.Text(text.ifEmpty { "No artifacts found for: $query" }))
+                listOf(UIMessagePart.Text(text))
             } catch (e: Exception) {
-                listOf(UIMessagePart.Text("Maven search failed: ${e.message}\nTry searching with groupId:artifactId format (e.g. com.google.guava:guava)"))
+                listOf(UIMessagePart.Text("ERROR: Maven search failed: ${e.message ?: "unknown"}.\nSUGGESTION: Try groupId:artifactId format (e.g. com.google.guava:guava) or check connectivity."))
             }
         },
     )

@@ -16,26 +16,32 @@ class VibeCodingTerminalTools(private val ideService: IdeService) {
 
     private val runCommand = Tool(
         name = "runCommand",
-        description = "Runs a shell command in the terminal environment. Prefer native IDE tools for file/editor operations, use this only for building, running, testing, or package installs.",
+        description = "Run a shell command in the terminal environment. " +
+            "Use ONLY for: building, running tests, package installs, compilation, linters. " +
+            "DO NOT use for file reading/writing, code search, git operations — native tools are faster. " +
+            "Always call saveOpenFiles first to ensure editor content is saved to disk. " +
+            "Example: {\"command\": \"npm run build\"} or {\"command\": \"kotlinc src/*.kt\", \"timeoutSeconds\": 60}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("command") { put("type", "string"); put("description", "Shell command to execute") }
-                    putJsonObject("timeoutSeconds") { put("type", "integer"); put("description", "Timeout in seconds (default: 120)") }
+                    putJsonObject("command") { put("type", "string"); put("description", "Shell command to execute. Can include pipes, redirects, chaining (&&, ||).") }
+                    putJsonObject("timeoutSeconds") { put("type", "integer"); put("description", "Timeout in seconds (default: 120, max: 600). Increase for long builds.") }
+                    putJsonObject("workdir") { put("type", "string"); put("description", "Working directory for the command (optional, defaults to project root)") }
                 },
                 required = listOf("command"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val command = obj["command"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing command"))
-            val timeout = obj["timeoutSeconds"]?.asJsonPrimitive?.asLong ?: 120L
+            val command = obj["command"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'command'.\nEXPECTED: {\"command\": \"npm run build\"}"))
+            val timeout = (obj["timeoutSeconds"]?.asJsonPrimitive?.asLong ?: 120L).coerceIn(1, 600)
             val result = ideService.runCommand(command, timeout)
             val text = buildString {
-                if (result.output.isNotBlank()) appendLine(result.output)
+                if (result.output.isNotBlank()) appendLine("STDOUT:\n${result.output}")
                 if (result.error.isNotBlank()) appendLine("STDERR:\n${result.error}")
-                appendLine("Exit code: ${result.exitCode}")
-                if (result.timedOut) appendLine("(Command timed out)")
+                append("Exit: ${result.exitCode}")
+                if (result.timedOut) append(" (TIMED OUT after ${timeout}s)")
             }
             listOf(UIMessagePart.Text(text.trimEnd()))
         },
@@ -43,11 +49,13 @@ class VibeCodingTerminalTools(private val ideService: IdeService) {
 
     private val getTerminalOutput = Tool(
         name = "getTerminalOutput",
-        description = "Gets recent terminal transcript output.",
+        description = "Get recent terminal transcript output. " +
+            "Use to check what was printed in an ongoing terminal session. " +
+            "Example: {\"lines\": 50}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("lines") { put("type", "integer"); put("description", "Number of recent lines to retrieve") }
+                    putJsonObject("lines") { put("type", "integer"); put("description", "Number of recent lines to retrieve (default: all available)") }
                 },
                 required = emptyList<String>(),
             )

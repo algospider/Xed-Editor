@@ -27,31 +27,35 @@ class VibeCodingWebTools(private val ideService: IdeService) {
 
     private val webFetch = Tool(
         name = "web_fetch",
-        description = "Fetches and extracts readable content from a URL. Supports text, HTML, JSON, XML, and markdown output.",
+        description = "Fetches and extracts readable content from a URL. " +
+            "Supports text, HTML, JSON, XML, and markdown output. " +
+            "Use for reading documentation, API responses, or web pages. " +
+            "For binary content, use web_download instead. " +
+            "Example: {\"url\": \"https://example.com\", \"format\": \"markdown\", \"timeout\": 30}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("url") { put("type", "string"); put("description", "The URL to fetch content from") }
-                    putJsonObject("format") { put("type", "string"); put("description", "Response format: 'text', 'markdown', 'html', or 'raw' (default: text)") }
-                    putJsonObject("timeout") { put("type", "integer"); put("description", "Timeout in seconds (default: 30)") }
-                    putJsonObject("maxBytes") { put("type", "integer"); put("description", "Maximum response bytes (default: 5MB)") }
+                    putJsonObject("format") { put("type", "string"); put("description", "Response format: 'text' (default), 'markdown', 'html', or 'raw'") }
+                    putJsonObject("timeout") { put("type", "integer"); put("description", "Timeout in seconds (default: 30, max: 60)") }
+                    putJsonObject("maxBytes") { put("type", "integer"); put("description", "Maximum response bytes (default: 5MB, max: 20MB)") }
                 },
                 required = listOf("url"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val urlStr = obj["url"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing url"))
+            val urlStr = obj["url"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'url'."))
             val format = obj["format"]?.asJsonPrimitive?.asString ?: "text"
             val timeout = obj["timeout"]?.asJsonPrimitive?.asLong ?: 30L
             val maxBytes = (obj["maxBytes"]?.asJsonPrimitive?.asInt ?: 5 * 1024 * 1024).coerceIn(1, 20 * 1024 * 1024)
 
-            val safeUrl = validateUrl(urlStr) ?: return@Tool listOf(UIMessagePart.Text("Invalid or unsafe URL"))
+            val safeUrl = validateUrl(urlStr) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Invalid or unsafe URL: $urlStr. SUGGESTION: Check the URL is public and uses http/https."))
             val response = fetchUrl(safeUrl, timeout, maxBytes)
 
             if (!isReadableContent(response.contentType) && format != "raw") {
                 return@Tool listOf(UIMessagePart.Text(
-                    "Binary or unsupported content type '${response.contentType}'. Use web_download to save this file."
+                    "ERROR: Binary content (${response.contentType}). Use web_download to save this file."
                 ))
             }
 
@@ -67,7 +71,10 @@ class VibeCodingWebTools(private val ideService: IdeService) {
 
     private val webSearch = Tool(
         name = "web_search",
-        description = "Searches the web using DuckDuckGo and returns titles, URLs, and snippets.",
+        description = "Searches the web via DuckDuckGo HTML and returns titles, URLs, and snippets. " +
+            "Use for quick lookup of docs, tutorials, or current info. " +
+            "For deep research on a topic, use web_research instead. " +
+            "Example: {\"query\": \"kotlin coroutines guide\", \"numResults\": 5}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -79,25 +86,30 @@ class VibeCodingWebTools(private val ideService: IdeService) {
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing query"))
+            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'query'."))
             val numResults = (obj["numResults"]?.asJsonPrimitive?.asInt ?: 8).coerceIn(1, 20)
 
             val results = searchDuckDuckGo(query, numResults)
+            if (results.isEmpty()) return@Tool listOf(UIMessagePart.Text("No results for: $query. SUGGESTION: Try broader terms or check internet connectivity."))
             val text = results.joinToString("\n\n") { "${it.rank}. ${it.title}\nURL: ${it.url}\n${it.snippet}" }
-            listOf(UIMessagePart.Text(text.ifEmpty { "No results found for: $query" }))
+            listOf(UIMessagePart.Text(text))
         },
     )
 
     private val webDownload = Tool(
         name = "web_download",
-        description = "Downloads a URL to a workspace file. Creates parent directories automatically and preserves binary content.",
+        description = "Downloads a URL to a workspace file. Preserves binary content. " +
+            "Use for downloading images, binaries, archives, or any non-text files. " +
+            "For text content you want to read, use web_fetch instead. " +
+            "Creates parent directories automatically. " +
+            "Example: {\"url\": \"https://example.com/file.zip\", \"outputPath\": \"downloads/file.zip\", \"overwrite\": true}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("url") { put("type", "string"); put("description", "URL to download") }
                     putJsonObject("outputPath") { put("type", "string"); put("description", "Workspace file path or existing directory where the download should be saved") }
-                    putJsonObject("timeout") { put("type", "integer"); put("description", "Timeout in seconds (default: 60)") }
-                    putJsonObject("maxBytes") { put("type", "integer"); put("description", "Maximum bytes to download (default: 100MB)") }
+                    putJsonObject("timeout") { put("type", "integer"); put("description", "Timeout in seconds (default: 60, max: 120)") }
+                    putJsonObject("maxBytes") { put("type", "integer"); put("description", "Maximum bytes to download (default: 100MB, max: 500MB)") }
                     putJsonObject("overwrite") { put("type", "boolean"); put("description", "Overwrite if file exists (default: false)") }
                 },
                 required = listOf("url", "outputPath"),
@@ -105,14 +117,14 @@ class VibeCodingWebTools(private val ideService: IdeService) {
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val urlStr = obj["url"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing url"))
-            val outputPath = obj["outputPath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing outputPath"))
+            val urlStr = obj["url"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'url'."))
+            val outputPath = obj["outputPath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'outputPath'."))
             val timeout = obj["timeout"]?.asJsonPrimitive?.asLong ?: 60L
             val maxBytes = (obj["maxBytes"]?.asJsonPrimitive?.asInt ?: 100 * 1024 * 1024).coerceIn(1, 500 * 1024 * 1024)
             val overwrite = obj["overwrite"]?.asJsonPrimitive?.asBoolean ?: false
 
-            val safeUrl = validateUrl(urlStr) ?: return@Tool listOf(UIMessagePart.Text("Invalid or unsafe URL"))
-            val targetBase = ideService.resolvePath(outputPath) ?: return@Tool listOf(UIMessagePart.Text("Invalid output path: $outputPath"))
+            val safeUrl = validateUrl(urlStr) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Invalid URL: $urlStr"))
+            val targetBase = ideService.resolvePath(outputPath) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Invalid output path: $outputPath"))
 
             val response = fetchUrl(safeUrl, timeout.coerceIn(1, 120), maxBytes)
             val target = if (targetBase.exists() && targetBase.isDirectory) {
@@ -121,37 +133,42 @@ class VibeCodingWebTools(private val ideService: IdeService) {
             } else {
                 targetBase
             }
-            if (target.exists() && !overwrite) return@Tool listOf(UIMessagePart.Text("File already exists: ${target.absolutePath}"))
+            if (target.exists() && !overwrite) return@Tool listOf(UIMessagePart.Text("ERROR: File exists: ${target.absolutePath}. Set overwrite=true or choose a different path."))
             target.parentFile?.mkdirs()
             target.writeBytes(response.bytes)
-            listOf(UIMessagePart.Text("Downloaded ${response.bytes.size} bytes to ${target.absolutePath}"))
+            listOf(UIMessagePart.Text("OK Downloaded ${response.bytes.size} bytes to ${target.absolutePath}"))
         },
     )
 
     private val webResearch = Tool(
         name = "web_research",
-        description = "Searches the web and fetches top result pages for research. Returns sources plus readable excerpts.",
+        description = "Searches the web AND fetches top result pages for deep research. " +
+            "Returns search results plus readable excerpts from each page. " +
+            "Use for comprehensive research — combines search + fetch in one call. " +
+            "For a quick list of results without the excerpts, use web_search instead. " +
+            "Example: {\"query\": \"latest kotlin multiplatform news\", \"numResults\": 3}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("query") { put("type", "string"); put("description", "Research query") }
                     putJsonObject("numResults") { put("type", "integer"); put("description", "Number of results to inspect (default: 5, max: 10)") }
                     putJsonObject("fetchPages") { put("type", "boolean"); put("description", "Fetch readable excerpts from result pages (default: true)") }
-                    putJsonObject("pageChars") { put("type", "integer"); put("description", "Characters per fetched page (default: 4000)") }
-                    putJsonObject("timeout") { put("type", "integer"); put("description", "Timeout per page in seconds (default: 20)") }
+                    putJsonObject("pageChars") { put("type", "integer"); put("description", "Characters per fetched page (default: 4000, max: 20000)") }
+                    putJsonObject("timeout") { put("type", "integer"); put("description", "Timeout per page in seconds (default: 20, max: 60)") }
                 },
                 required = listOf("query"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing query"))
+            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'query'."))
             val numResults = (obj["numResults"]?.asJsonPrimitive?.asInt ?: 5).coerceIn(1, 10)
             val fetchPages = obj["fetchPages"]?.asJsonPrimitive?.asBoolean ?: true
             val pageChars = (obj["pageChars"]?.asJsonPrimitive?.asInt ?: 4000).coerceIn(500, 20000)
             val timeoutSec = (obj["timeout"]?.asJsonPrimitive?.asLong ?: 20L).coerceIn(1, 60)
 
             val results = searchDuckDuckGo(query, numResults)
+            if (results.isEmpty()) return@Tool listOf(UIMessagePart.Text("No results for: $query. SUGGESTION: Try broader terms or check internet connectivity."))
 
             val text = buildString {
                 appendLine("Research query: $query")

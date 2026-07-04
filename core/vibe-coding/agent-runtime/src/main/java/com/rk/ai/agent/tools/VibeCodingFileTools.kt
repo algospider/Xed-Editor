@@ -10,6 +10,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.json.putJsonArray
+import com.rk.ai.agent.RecoveryHint
+import com.rk.ai.agent.deriveRecoveryHint
 import com.rk.ai.models.InputSchema
 import com.rk.ai.models.Tool
 import com.rk.ai.models.UIMessagePart
@@ -29,14 +31,11 @@ class VibeCodingFileTools(
 
         fun parseFilePaths(element: com.google.gson.JsonElement?): List<String> {
             if (element == null) return emptyList()
-
             if (element is JsonArray) {
                 return element.mapNotNull { it.asJsonPrimitive?.asString?.trim() }.filter { it.isNotBlank() }
             }
-
             val raw = element.asJsonPrimitive?.asString?.trim() ?: return emptyList()
             if (raw.isBlank()) return emptyList()
-
             if (raw.startsWith("[")) {
                 return runCatching {
                     val arr = JsonParser.parseString(raw).asJsonArray
@@ -45,59 +44,77 @@ class VibeCodingFileTools(
                     raw.removeSurrounding("[", "]").split(",").map { it.trim().removeSurrounding("\"") }.filter { it.isNotBlank() }
                 )
             }
-
             return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        }
+
+        private fun countMatches(text: String, search: String): Int {
+            var count = 0
+            var idx = 0
+            while (true) {
+                idx = text.indexOf(search, idx)
+                if (idx == -1) break
+                count++
+                idx += search.length
+            }
+            return count
+        }
+
+        private fun buildRecoveryMsg(error: String, toolName: String): String? {
+            val hint = deriveRecoveryHint(toolName, error)
+            return if (hint != null) "[RECOVERY] $error. ${hint.message}" else null
         }
     }
 
     private val readFile = Tool(
         name = "readFile",
-        description = "Read a file by path (supports startLine/endLine, 1-indexed, inclusive). Content truncated at 250KB.",
+        description = "Read a file by path. Supports line ranges (1-indexed). Content truncated at 250KB. " +
+            "Use for single file reads. For multiple files, prefer readFiles (batch). " +
+            "For search-then-read, prefer searchAndRead. " +
+            "Example: {\"path\": \"src/main.kt\"} or {\"path\": \"src/main.kt\", \"startLine\": 10, \"endLine\": 50}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("path") { put("type", "string"); put("description", "Absolute or workspace-relative path to the file") }
-                    putJsonObject("startLine") { put("type", "integer"); put("description", "First line to read (1-indexed)") }
-                    putJsonObject("endLine") { put("type", "integer"); put("description", "Last line to read (inclusive)") }
+                    putJsonObject("startLine") { put("type", "integer"); put("description", "First line to read (1-indexed). Use with endLine to read a specific range.") }
+                    putJsonObject("endLine") { put("type", "integer"); put("description", "Last line to read (inclusive). Use with startLine.") }
                 },
                 required = listOf("path"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val rawPath = obj["path"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing path argument"))
+            val rawPath = obj["path"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'path' argument.\nSUGGESTION: Provide an absolute or workspace-relative path, e.g. {\"path\": \"src/main.kt\"}"))
             val startLine = obj["startLine"]?.asJsonPrimitive?.asInt
             val endLine = obj["endLine"]?.asJsonPrimitive?.asInt
             val resolved = ideService.resolvePath(rawPath)
-            val filePath = resolved?.absolutePath ?: rawPath
+            if (resolved == null) return@Tool listOf(UIMessagePart.Text("ERROR: Could not resolve path '$rawPath'.\nSUGGESTION: Use getProjectStructure or listFiles to verify the path exists. Try an absolute path or check if the file is inside the workspace."))
+            val filePath = resolved.absolutePath
 
-            // Use cache only for full-file reads
             if (startLine == null && endLine == null) {
                 val cached = fileContentCache.get(filePath)
-                if (cached != null) {
-                    return@Tool listOf(UIMessagePart.Text(cached))
-                }
+                if (cached != null) return@Tool listOf(UIMessagePart.Text(cached))
             }
 
             val content = ideService.getFileContent(filePath, startLine, endLine)
             if (content != null) {
-                if (startLine == null && endLine == null) {
-                    fileContentCache.put(filePath, content)
-                }
+                if (startLine == null && endLine == null) fileContentCache.put(filePath, content)
                 listOf(UIMessagePart.Text(content))
             } else {
-                listOf(UIMessagePart.Text("File not found: $rawPath"))
+                listOf(UIMessagePart.Text("ERROR: File not found: $rawPath\nSUGGESTION: Verify the file exists with listFiles. If the path is relative, it must be relative to the workspace root."))
             }
         },
     )
 
     private val readFiles = Tool(
         name = "readFiles",
-        description = "Read multiple files in one call. Pass comma-separated paths or a JSON array path strings. Faster than repeated readFile calls.",
+        description = "Read MULTIPLE files in one call (batch mode). Pass comma-separated paths or a JSON array. " +
+            "Use INSTEAD of repeated readFile calls to minimize round-trips. " +
+            "Example: {\"filePaths\": [\"src/a.kt\", \"src/b.kt\"]} or {\"filePaths\": \"src/a.kt, src/b.kt\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("filePaths") { put("type", "string"); put("description", "Comma-separated list of paths or JSON array of path strings") }
+                    putJsonObject("filePaths") { put("type", "string"); put("description", "Comma-separated list of paths (e.g. \"a.kt, b.kt, c.kt\") or JSON array of path strings") }
                 },
                 required = listOf("filePaths"),
             )
@@ -105,17 +122,15 @@ class VibeCodingFileTools(
         execute = { args ->
             val obj = args.asJsonObject
             val paths = parseFilePaths(obj["filePaths"])
-            if (paths.isEmpty()) return@Tool listOf(UIMessagePart.Text("Missing filePaths argument"))
+            if (paths.isEmpty()) return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePaths argument.\nEXPECTED: {\"filePaths\": [\"file1.kt\", \"file2.kt\"]}"))
             val results = paths.map { rawPath ->
                 val resolved = ideService.resolvePath(rawPath)
                 val filePath = resolved?.absolutePath ?: rawPath
                 val cached = fileContentCache.get(filePath)
                 val content = cached ?: ideService.getFileContent(filePath, null, null)
-                if (cached == null && content != null) {
-                    fileContentCache.put(filePath, content)
-                }
+                if (cached == null && content != null) fileContentCache.put(filePath, content)
                 if (content != null) "--- $rawPath ---\n$content"
-                else "--- $rawPath ---\n(FILE NOT FOUND)"
+                else "--- $rawPath ---\n[FILE NOT FOUND]"
             }
             listOf(UIMessagePart.Text(results.joinToString("\n\n")))
         },
@@ -123,31 +138,107 @@ class VibeCodingFileTools(
 
     private val writeFile = Tool(
         name = "writeFile",
-        description = "Write or overwrite a file. Creates parent directories automatically. Opens a review tab for user confirmation.",
+        description = "Write or OVERWRITE a file completely. Creates parent directories automatically. " +
+            "Use for creating new files or full rewrites. " +
+            "For targeted edits, prefer editFile (surgical find-and-replace) to minimize context and potential errors. " +
+            "For multiple files, prefer applyBatchEdits. " +
+            "Example: {\"filePath\": \"src/main.kt\", \"content\": \"fun main() {}\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("path") { put("type", "string"); put("description", "Absolute path to the file") }
-                    putJsonObject("content") { put("type", "string"); put("description", "The full content to write") }
+                    putJsonObject("filePath") { put("type", "string"); put("description", "Absolute path to the file to write") }
+                    putJsonObject("content") { put("type", "string"); put("description", "The full content to write. Overwrites existing content entirely.") }
                 },
-                required = listOf("path", "content"),
+                required = listOf("filePath", "content"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val path = obj["path"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing path argument"))
-            val content = obj["content"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing content argument"))
+            val path = obj["filePath"]?.asJsonPrimitive?.asString ?: obj["path"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath' argument.\nEXPECTED: {\"filePath\": \"src/main.kt\", \"content\": \"...\"}"))
+            val content = obj["content"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'content' argument.\nEXPECTED: {\"filePath\": \"src/main.kt\", \"content\": \"...\"}"))
             val file = ideService.resolvePath(path)
-            if (file == null) return@Tool listOf(UIMessagePart.Text("Path could not be resolved: $path"))
-            ideService.writeFile(file, content)
-            fileContentCache.invalidate(file.absolutePath)
-            listOf(UIMessagePart.Text("Written to ${file.absolutePath}"))
+            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $path\nSUGGESTION: Use an absolute path or a workspace-relative path."))
+            try {
+                file.parentFile?.mkdirs()
+                ideService.writeFile(file, content)
+                fileContentCache.invalidate(file.absolutePath)
+                listOf(UIMessagePart.Text("OK ${file.absolutePath} (${content.length} bytes)"))
+            } catch (e: Exception) {
+                val hint = buildRecoveryMsg(e.message ?: "Write failed", "writeFile")
+                listOf(UIMessagePart.Text("ERROR: Failed to write $path: ${e.message}${hint?.let { "\n$it" } ?: ""}"))
+            }
         },
     )
 
     private val editFile = Tool(
         name = "editFile",
-        description = "Find exact text in a file and replace it. Preferred for targeted edits. Provide enough context in oldString for a unique match. Use replaceAll=true to replace all occurrences.",
+        description = "Surgical find-and-replace in a file. " +
+            "PROVIDE ENOUGH CONTEXT in oldString for a UNIQUE match (include surrounding lines). " +
+            "Use replaceAll=true to replace all occurrences. " +
+            "Use editFile instead of writeFile when you only need to change a small portion of a file. " +
+            "For multiple edits in one file, use multiEditFile. " +
+            "For read+edit in one call, use readAndEdit. " +
+            "Example: {\"filePath\": \"src/main.kt\", \"oldString\": \"fun oldName()\", \"newString\": \"fun newName()\"}",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    putJsonObject("filePath") { put("type", "string"); put("description", "Absolute path to the file to edit") }
+                    putJsonObject("oldString") { put("type", "string"); put("description", "The EXACT text to find. Must match whitespace exactly. Include enough surrounding lines for a unique match. Use the full line(s) as they appear in the file.") }
+                    putJsonObject("newString") { put("type", "string"); put("description", "The replacement text. Can be empty string to delete oldString.") }
+                    putJsonObject("replaceAll") { put("type", "boolean"); put("description", "Set true to replace ALL occurrences instead of just the first. Use when you're sure the text appears multiple times and all should be replaced.") }
+                },
+                required = listOf("filePath", "oldString", "newString"),
+            )
+        },
+        execute = { args ->
+            val obj = args.asJsonObject
+            val filePath = obj["filePath"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'filePath'."))
+            val oldString = obj["oldString"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'oldString'."))
+            val newString = obj["newString"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'newString'."))
+            val replaceAll = obj["replaceAll"]?.asJsonPrimitive?.asBoolean ?: false
+            val file = ideService.resolvePath(filePath)
+            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $filePath\nSUGGESTION: Try an absolute path."))
+            val resolvedPath = file.absolutePath
+
+            val content = ideService.getFileContent(resolvedPath, null, null)
+            if (content == null) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: $resolvedPath\nSUGGESTION: Verify the file exists with listFiles."))
+
+            val matchCount = countMatches(content, oldString)
+            if (matchCount == 0) {
+                val contextHint = oldString.lines().let { lines ->
+                    if (lines.size >= 3) "\nTRY: Include the line BEFORE and AFTER your target text to make the match unique."
+                    else "\nTRY: Read the file first to see exact content. Whitespace (spaces vs tabs) must match exactly."
+                }
+                return@Tool listOf(UIMessagePart.Text("ERROR: Text not found in $resolvedPath (0 matches).$contextHint"))
+            }
+            if (matchCount > 1 && !replaceAll) {
+                return@Tool listOf(UIMessagePart.Text(
+                    "ERROR: Found $matchCount matches in $resolvedPath. " +
+                    "Use replaceAll=true to replace all, or add more surrounding context to oldString for a unique match."
+                ))
+            }
+
+            val result = if (replaceAll) content.replace(oldString, newString)
+            else content.replaceFirst(oldString, newString)
+            ideService.writeFile(file, result)
+            fileContentCache.invalidate(resolvedPath)
+            val replaced = if (replaceAll) " (replaced all $matchCount occurrences)" else ""
+            listOf(UIMessagePart.Text("OK $resolvedPath$replaced"))
+        },
+    )
+
+    private val readAndEdit = Tool(
+        name = "readAndEdit",
+        description = "COMBINED: Read a file, apply a single edit, then return both before and after content. " +
+            "Saves 2 round-trips vs readFile + editFile + readFile. " +
+            "Exactly the same parameters as editFile, but returns BEFORE and AFTER for verification. " +
+            "Use this when you need to see the result immediately. " +
+            "Example: {\"filePath\": \"src/main.kt\", \"oldString\": \"foo()\", \"newString\": \"bar()\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -161,53 +252,45 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing filePath"))
-            val oldString = obj["oldString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing oldString"))
-            val newString = obj["newString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing newString"))
+            val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath"))
+            val oldString = obj["oldString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing oldString"))
+            val newString = obj["newString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing newString"))
             val replaceAll = obj["replaceAll"]?.asJsonPrimitive?.asBoolean ?: false
+
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text("Path could not be resolved: $filePath"))
+            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $filePath"))
             val resolvedPath = file.absolutePath
-            val content = ideService.getFileContent(resolvedPath, null, null) ?: return@Tool listOf(UIMessagePart.Text("File not found: $resolvedPath"))
 
-            var matchCount = 0
-            var searchIdx = 0
-            while (true) {
-                searchIdx = content.indexOf(oldString, searchIdx)
-                if (searchIdx == -1) break
-                matchCount++
-                searchIdx += oldString.length
-            }
+            val cached = fileContentCache.get(resolvedPath)
+            val content = cached ?: ideService.getFileContent(resolvedPath, null, null)
+            if (content == null) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: $resolvedPath"))
+            if (cached == null) fileContentCache.put(resolvedPath, content)
 
-            if (matchCount == 0) {
-                return@Tool listOf(UIMessagePart.Text("Text not found in $resolvedPath. Ensure the whitespace in oldString matches the file exactly."))
-            }
+            val matchCount = countMatches(content, oldString)
+            if (matchCount == 0) return@Tool listOf(UIMessagePart.Text("ERROR: Text not found in $resolvedPath. Ensure exact whitespace matching."))
+            if (matchCount > 1 && !replaceAll) return@Tool listOf(UIMessagePart.Text("ERROR: Found $matchCount matches. Use replaceAll=true or add more context."))
 
-            if (matchCount > 1 && !replaceAll) {
-                return@Tool listOf(UIMessagePart.Text(
-                    "Found $matchCount matches in $resolvedPath. " +
-                    "Use replaceAll=true or add more surrounding context to oldString for a unique match."
-                ))
-            }
-
-            val result = content.replace(oldString, newString)
+            val result = if (replaceAll) content.replace(oldString, newString) else content.replaceFirst(oldString, newString)
             ideService.writeFile(file, result)
             fileContentCache.invalidate(resolvedPath)
-            val note = if (replaceAll) " (replaced all $matchCount occurrences)" else ""
-            listOf(UIMessagePart.Text("Edited $resolvedPath$note"))
+            listOf(UIMessagePart.Text("BEFORE:\n$content\n\nAFTER:\n$result\n\nOK $resolvedPath"))
         },
     )
 
     private val multiEditFile = Tool(
         name = "multiEditFile",
-        description = "Replace multiple blocks of text in a single file atomically. Each edit must have a unique oldString match. Fails entirely if any edit cannot be applied exactly once.",
+        description = "ATOMIC multi-edit: Replace multiple blocks of text in a single file at once. " +
+            "Each edit must be uniquely matchable. Fails ENTIRELY if any single edit cannot be applied. " +
+            "Use for multiple changes in one file (e.g. rename a class and its constructor). " +
+            "For single edits, use editFile. For multi-file edits, use applyBatchEdits. " +
+            "Example: {\"filePath\": \"src/main.kt\", \"edits\": [{\"oldString\": \"class A\", \"newString\": \"class B\"}, {\"oldString\": \"A()\", \"newString\": \"B()\"}]}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("filePath") { put("type", "string"); put("description", "Absolute path to the file") }
-                    putJsonObject("edits") { 
+                    putJsonObject("edits") {
                         put("type", "array")
-                        put("description", "Array of objects containing oldString and newString")
+                        put("description", "Array of {oldString, newString} objects. Each must have unique match.")
                         putJsonObject("items") {
                             put("type", "object")
                             putJsonObject("properties") {
@@ -226,126 +309,108 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing filePath"))
-            val editsArr = obj["edits"]?.asJsonArray ?: return@Tool listOf(UIMessagePart.Text("Missing edits array"))
-            
+            val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath"))
+            val editsArr = obj["edits"]?.asJsonArray ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing edits array"))
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text("Path could not be resolved: $filePath"))
-            
-            var content = ideService.getFileContent(file.absolutePath, null, null) 
-                ?: return@Tool listOf(UIMessagePart.Text("File not found: ${file.absolutePath}"))
-            
+            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $filePath"))
+            var content = ideService.getFileContent(file.absolutePath, null, null)
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: File not found: ${file.absolutePath}"))
             var successCount = 0
-            var errorCount = 0
             val errors = mutableListOf<String>()
-            
             for (i in 0 until editsArr.size()) {
                 val editObj = editsArr[i].asJsonObject
                 val oldString = editObj["oldString"]?.asJsonPrimitive?.asString ?: ""
                 val newString = editObj["newString"]?.asJsonPrimitive?.asString ?: ""
-                
                 if (oldString.isEmpty()) continue
-                
-                val matchCount = content.split(oldString).size - 1
-                if (matchCount == 0) {
-                    errorCount++
-                    errors.add("Edit ${i+1}: Could not find exact text to replace:\n```\n${oldString.take(200)}\n```")
-                } else if (matchCount > 1) {
-                    errorCount++
-                    val lines = oldString.lines()
-                    val hint = if (lines.size <= 2) {
-                        "\nThe text appears $matchCount times. Add more surrounding lines to make it unique."
-                    } else {
-                        val firstLine = lines.first().trim()
-                        val lastLine = lines.last().trim()
-                        "\nFound $matchCount matches. Try including unique lines like:\n  First: \"$firstLine\"\n  Last: \"$lastLine\""
-                    }
-                    errors.add("Edit ${i+1}: Found $matchCount matches for oldString.$hint")
-                } else {
-                    content = content.replaceFirst(oldString, newString)
-                    successCount++
-                }
+                val mc = countMatches(content, oldString)
+                if (mc == 0) errors.add("Edit ${i+1}: Text not found (check whitespace): ${oldString.take(80)}...")
+                else if (mc > 1) errors.add("Edit ${i+1}: Found $mc matches. Add more context: ${oldString.take(80)}...")
+                else { content = content.replaceFirst(oldString, newString); successCount++ }
             }
-            
-            if (successCount > 0 && errorCount == 0) {
+            if (successCount > 0 && errors.isEmpty()) {
                 ideService.writeFile(file, content)
                 fileContentCache.invalidate(file.absolutePath)
-                listOf(UIMessagePart.Text("Successfully applied $successCount edits to ${file.absolutePath}"))
-            } else if (successCount > 0 && errorCount > 0) {
-                listOf(UIMessagePart.Text("Failed to apply all edits. No changes were written to disk. Errors:\n" + errors.joinToString("\n")))
+                listOf(UIMessagePart.Text("OK $successCount edits to ${file.absolutePath}"))
             } else {
-                listOf(UIMessagePart.Text("Failed to apply any edits. No changes were written to disk. Errors:\n" + errors.joinToString("\n")))
+                listOf(UIMessagePart.Text("ERROR: No changes written.\n${errors.joinToString("\n")}"))
             }
         }
     )
 
     private val applyBatchEdits = Tool(
         name = "applyBatchEdits",
-        description = "Write new content to multiple files at once. Keys are file paths, values are full file content. Use for cross-file changes to minimize turns.",
+        description = "Apply changes to MULTIPLE files at once in a single call. " +
+            "Keys are file paths, values are the FULL new file content. " +
+            "Use for cross-file changes to MINIMIZE ROUND-TRIPS (e.g. creating an interface and its implementation). " +
+            "For single-file multi-edit, use multiEditFile. " +
+            "Example: {\"edits\": {\"src/a.kt\": \"content a...\", \"src/b.kt\": \"content b...\"}}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("edits") { put("type", "string"); put("description", "JSON object mapping file paths to their new content: {\"path/to/file.kt\": \"new content...\"}") }
+                    putJsonObject("edits") { put("type", "object"); put("description", "JSON object where keys are file paths, values are full file content strings. Example: {\"path/to/file.kt\": \"new content...\"}") }
                 },
                 required = listOf("edits"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val editsElement = obj["edits"] ?: return@Tool listOf(UIMessagePart.Text("Missing edits argument (must be a JSON object)"))
-            val editsObj = when {
-                editsElement.isJsonObject -> editsElement.asJsonObject
-                editsElement.isJsonPrimitive && editsElement.asJsonPrimitive.isString -> {
-                    try {
-                        com.google.gson.JsonParser.parseString(editsElement.asString).asJsonObject
-                    } catch (e: Exception) {
-                        return@Tool listOf(UIMessagePart.Text("Invalid JSON string in 'edits': ${e.message}"))
-                    }
-                }
-                else -> return@Tool listOf(UIMessagePart.Text("'edits' must be a JSON object or a JSON string"))
-            }
-            val edits = mutableMapOf<String, String>()
-            editsObj.entrySet().forEach { entry ->
-                val path = entry.key
-                val content = when {
-                    entry.value.isJsonPrimitive -> entry.value.asString
-                    entry.value.isJsonObject -> entry.value.toString()
-                    else -> entry.value.toString()
-                }
+            val editsObj = obj["edits"]?.asJsonObject
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'edits' object. Expected: {\"edits\": {\"file1.kt\": \"content1\", \"file2.kt\": \"content2\"}}"))
+            val results = mutableListOf<String>()
+            for ((path, contentVal) in editsObj.entrySet()) {
                 val file = ideService.resolvePath(path)
-                edits[file?.absolutePath ?: path] = content
+                if (file == null) { results.add("FAIL: $path (could not resolve)"); continue }
+                val text = contentVal?.asJsonPrimitive?.asString
+                if (text == null) { results.add("FAIL: $path (content must be a string)"); continue }
+                try {
+                    file.parentFile?.mkdirs()
+                    ideService.writeFile(file, text)
+                    fileContentCache.invalidate(file.absolutePath)
+                    results.add("OK ${file.absolutePath} (${text.length} bytes)")
+                } catch (e: Exception) { results.add("FAIL: $path (${e.message})") }
             }
-            ideService.applyBatchEdits(edits)
-            edits.keys.forEach { fileContentCache.invalidate(it) }
-            listOf(UIMessagePart.Text("Batch edits for ${edits.size} files applied."))
+            listOf(UIMessagePart.Text(results.joinToString("\n")))
         },
     )
 
     private val createFile = Tool(
         name = "createFile",
-        description = "Create a new file with optional initial content. Parent directories created automatically.",
+        description = "Create a new file with optional initial content. Parent directories are created automatically. " +
+            "Fails if the file already exists. For overwriting, use writeFile. " +
+            "Example: {\"filePath\": \"src/newfile.kt\", \"content\": \"fun main() { println(\\\"hi\\\") }\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("filePath") { put("type", "string"); put("description", "Absolute path for the new file") }
-                    putJsonObject("content") { put("type", "string"); put("description", "Initial file content (optional)") }
+                    putJsonObject("content") { put("type", "string"); put("description", "Initial file content (optional, defaults to empty)") }
                 },
                 required = listOf("filePath"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing filePath"))
-            val content = obj["content"]?.asJsonPrimitive?.asString
-            val result = ideService.createFile(filePath, content)
-            fileContentCache.invalidate(filePath)
-            listOf(UIMessagePart.Text(result))
+            val filePath = obj["filePath"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'filePath'."))
+            val content = obj["content"]?.asJsonPrimitive?.asString ?: ""
+            val file = ideService.resolvePath(filePath)
+            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Could not resolve path: $filePath"))
+            if (file.exists()) return@Tool listOf(UIMessagePart.Text("ERROR: File already exists: $filePath\nSUGGESTION: Use writeFile to overwrite, or choose a different path."))
+            try {
+                file.parentFile?.mkdirs()
+                ideService.writeFile(file, content)
+                fileContentCache.invalidate(file.absolutePath)
+                listOf(UIMessagePart.Text("OK Created ${file.absolutePath} (${content.length} bytes)"))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: Could not create $filePath: ${e.message}"))
+            }
         },
     )
 
     private val deleteFile = Tool(
         name = "deleteFile",
-        description = "Delete a file permanently from the workspace.",
+        description = "Permanently delete a file from the workspace. Cannot be undone. " +
+            "Use with caution — only delete files you're sure are no longer needed. " +
+            "Example: {\"filePath\": \"src/old_unused_file.kt\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -355,43 +420,66 @@ class VibeCodingFileTools(
             )
         },
         execute = { args ->
-            val filePath = args.asJsonObject["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing filePath"))
-            val result = ideService.deleteFile(filePath)
-            fileContentCache.invalidate(filePath)
-            listOf(UIMessagePart.Text(result))
+            val filePath = args.asJsonObject["filePath"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath'."))
+            val file = ideService.resolvePath(filePath)
+            if (file == null || !file.exists()) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: $filePath\nSUGGESTION: Verify the path with listFiles."))
+            try {
+                ideService.deleteFile(filePath)
+                fileContentCache.invalidate(file.absolutePath)
+                listOf(UIMessagePart.Text("OK Deleted $filePath"))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: Could not delete $filePath: ${e.message}"))
+            }
         },
     )
 
     private val renameFile = Tool(
         name = "renameFile",
-        description = "Rename or move a file or directory to a new workspace path.",
+        description = "Rename or move a file or directory within the workspace. " +
+            "Source must exist, destination must NOT exist. " +
+            "Example: {\"sourcePath\": \"src/old_name.kt\", \"destPath\": \"src/new_name.kt\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("sourcePath") { put("type", "string"); put("description", "Current path of the file or directory") }
-                    putJsonObject("destPath") { put("type", "string"); put("description", "New path for the file or directory") }
+                    putJsonObject("sourcePath") { put("type", "string"); put("description", "Current absolute path of the file or directory") }
+                    putJsonObject("destPath") { put("type", "string"); put("description", "New absolute path for the file or directory") }
                 },
                 required = listOf("sourcePath", "destPath"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val sourcePath = obj["sourcePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing sourcePath"))
-            val destPath = obj["destPath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing destPath"))
-            val result = ideService.renameFile(sourcePath, destPath)
-            fileContentCache.invalidate(sourcePath)
-            fileContentCache.invalidate(destPath)
-            listOf(UIMessagePart.Text(result))
+            val sourcePath = obj["sourcePath"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'sourcePath'."))
+            val destPath = obj["destPath"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'destPath'."))
+            val source = ideService.resolvePath(sourcePath)
+            val dest = ideService.resolvePath(destPath)
+            if (source == null || !source.exists()) return@Tool listOf(UIMessagePart.Text("ERROR: Source not found: $sourcePath"))
+            if (dest == null) return@Tool listOf(UIMessagePart.Text("ERROR: Could not resolve destination: $destPath"))
+            if (dest.exists()) return@Tool listOf(UIMessagePart.Text("ERROR: Destination already exists: $destPath"))
+            try {
+                ideService.renameFile(sourcePath, destPath)
+                fileContentCache.invalidate(source.absolutePath)
+                fileContentCache.invalidate(dest.absolutePath)
+                listOf(UIMessagePart.Text("OK $sourcePath → $destPath"))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: Rename failed: ${e.message}"))
+            }
         },
     )
 
     private val listFiles = Tool(
         name = "listFiles",
-        description = "List files in a directory. Supports recursive mode and maxFiles limit.",
+        description = "List files in a directory. Supports recursive mode and maxFiles limit. " +
+            "Use to explore the workspace structure. " +
+            "For a full project tree, use getProjectStructure. " +
+            "Example: {\"path\": \".\", \"recursive\": true, \"maxFiles\": 50}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("path") { put("type", "string"); put("description", "Directory path to list") }
+                    putJsonObject("path") { put("type", "string"); put("description", "Directory path to list (use \".\" for workspace root)") }
                     putJsonObject("recursive") { put("type", "boolean"); put("description", "List files recursively (default: false)") }
                     putJsonObject("maxFiles") { put("type", "integer"); put("description", "Maximum number of files to return (default: 500, max: 5000)") }
                 },
@@ -400,39 +488,40 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val path = obj["path"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing path"))
+            val path = obj["path"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
             val recursive = obj["recursive"]?.asJsonPrimitive?.asBoolean ?: false
             val maxFiles = (obj["maxFiles"]?.asJsonPrimitive?.asInt ?: 500).coerceIn(1, 5000)
             val file = ideService.resolvePath(path)
             if (file != null && file.isDirectory) {
                 val entries = ideService.listFiles(file, recursive, maxFiles)
-                listOf(UIMessagePart.Text(entries.joinToString("\n")))
+                listOf(UIMessagePart.Text(if (entries.isNotEmpty()) entries.joinToString("\n") else "(empty directory)"))
             } else {
-                listOf(UIMessagePart.Text("Directory not found: $path"))
+                listOf(UIMessagePart.Text("ERROR: Directory not found: $path\nSUGGESTION: Use getProjectStructure to see available directories."))
             }
         },
     )
 
     private val findFiles = Tool(
         name = "findFiles",
-        description = "Find files by glob pattern (e.g. '*.kt' or '**/*.java'). Returns matching file paths.",
+        description = "Find files by glob pattern (e.g. '*.kt' or '**/*.java'). " +
+            "Returns matching file paths within the workspace. " +
+            "Use when you know the file name or extension but not the exact path. " +
+            "Example: {\"query\": \"**/*.kt\"} or {\"query\": \"*ViewModel*\", \"path\": \"src/\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("query") { put("type", "string"); put("description", "File name or glob pattern to search for (e.g. *.kt, **/*.java)") }
-                    putJsonObject("pattern") { put("type", "string"); put("description", "Alternative to query") }
-                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 100)") }
-                    putJsonObject("path") { put("type", "string"); put("description", "Directory to search in (default: workspace root)") }
+                    putJsonObject("query") { put("type", "string"); put("description", "Glob pattern (e.g. '*.kt', '**/*.java', '*Test*')") }
+                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 100, max: 200)") }
+                    putJsonObject("path") { put("type", "string"); put("description", "Directory to scope the search (default: workspace root)") }
                 },
-                required = emptyList(),
+                required = listOf("query"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val query = obj["query"]?.asJsonPrimitive?.asString
-                ?: obj["pattern"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("Missing query/pattern"))
-            val limit = obj["limit"]?.asJsonPrimitive?.asInt ?: 100
+            val query = obj["query"]?.asJsonPrimitive?.asString ?: obj["pattern"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'query' (glob pattern). Example: {\"query\": \"*.kt\"}"))
+            val limit = (obj["limit"]?.asJsonPrimitive?.asInt ?: 100).coerceIn(1, 200)
             val rawPath = obj["path"]?.asJsonPrimitive?.asString
             val resolvedDir = if (rawPath != null) ideService.resolvePath(rawPath)?.absolutePath else null
             val results = ideService.findFiles(query, limit, resolvedDir ?: rawPath)
@@ -440,48 +529,49 @@ class VibeCodingFileTools(
                 val text = results.joinToString("\n") { element ->
                     when {
                         element.isJsonObject -> {
-                            val path = element.asJsonObject["path"]?.asString ?: element.toString()
-                            val name = element.asJsonObject["name"]?.asString
-                            if (name != null) "$path ($name)" else path
+                            val p = element.asJsonObject["path"]?.asString ?: element.toString()
+                            val n = element.asJsonObject["name"]?.asString
+                            if (n != null) "$p ($n)" else p
                         }
                         element.isJsonPrimitive -> element.asString
                         else -> element.toString()
                     }
                 }
-                listOf(UIMessagePart.Text(text))
+                listOf(UIMessagePart.Text(text.ifEmpty { "(no matches)" }))
             } else {
-                listOf(UIMessagePart.Text("No files found matching: $query"))
+                listOf(UIMessagePart.Text("No matches for: $query\nSUGGESTION: Try a broader pattern (e.g. *$query* instead of $query)"))
             }
         },
     )
 
     private val tail = Tool(
         name = "tail",
-        description = "Read the last N lines of a file. Useful for logs, recent output, or the end of generated files.",
+        description = "Read the LAST N lines of a file. " +
+            "Useful for checking log output, recent additions to generated files, or file endings. " +
+            "More efficient than readFile when you only need the end of a file. " +
+            "Example: {\"path\": \"build.log\", \"lines\": 20}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("path") { put("type", "string"); put("description", "Absolute or relative path to the file") }
-                    putJsonObject("filePath") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("file") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("lines") { put("type", "integer"); put("description", "Number of lines to read from the bottom (default: 10, max: 10000)") }
-                    putJsonObject("count") { put("type", "integer"); put("description", "Alias for lines") }
+                    putJsonObject("path") { put("type", "string"); put("description", "Absolute or workspace-relative path") }
+                    putJsonObject("lines") { put("type", "integer"); put("description", "Number of lines from the bottom (default: 10, max: 10000)") }
                 },
-                required = emptyList(),
+                required = listOf("path"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val rawPath = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("Missing path/filePath/file"))
-            val n = (obj["lines"]?.asJsonPrimitive?.asInt ?: obj["count"]?.asJsonPrimitive?.asInt ?: 10).coerceIn(1, 10000)
+            val rawPath = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
+            val n = (obj["lines"]?.asJsonPrimitive?.asInt ?: 10).coerceIn(1, 10000)
             val resolved = ideService.resolvePath(rawPath)
-            val filePath = resolved?.absolutePath ?: rawPath
+            if (resolved == null) return@Tool listOf(UIMessagePart.Text("ERROR: Could not resolve path: $rawPath"))
+            val filePath = resolved.absolutePath
             var fullContent = fileContentCache.get(filePath)
             if (fullContent == null) {
                 fullContent = ideService.getFileContent(filePath, null, null)
                 if (fullContent != null) fileContentCache.put(filePath, fullContent)
             }
-            if (fullContent == null) return@Tool listOf(UIMessagePart.Text("File not found: $rawPath"))
+            if (fullContent == null) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: $rawPath"))
             val lines = fullContent.split("\n")
             val tailLines = lines.takeLast(n)
             listOf(UIMessagePart.Text(tailLines.joinToString("\n")))
@@ -490,156 +580,81 @@ class VibeCodingFileTools(
 
     private val wc = Tool(
         name = "wc",
-        description = "Count lines, words, characters, and bytes in a file. Accepts path/filePath/file.",
+        description = "Count lines, words, characters, and bytes in a file. " +
+            "Returns a JSON object with counts. Useful for quick file size assessment. " +
+            "Example: {\"path\": \"src/main.kt\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("path") { put("type", "string"); put("description", "Absolute or relative path to the file") }
-                    putJsonObject("filePath") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("file") { put("type", "string"); put("description", "Alternative to path") }
+                    putJsonObject("path") { put("type", "string"); put("description", "Absolute or workspace-relative path") }
                 },
-                required = emptyList(),
+                required = listOf("path"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val path = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("Missing path/filePath/file"))
-            val file = ideService.resolvePath(path) ?: return@Tool listOf(UIMessagePart.Text("Path not found: $path"))
+            val path = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
+            val file = ideService.resolvePath(path)
+            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $path"))
             var text = fileContentCache.get(file.absolutePath)
             if (text == null) {
                 text = ideService.getFileContent(file.absolutePath, null, null)
                 if (text != null) fileContentCache.put(file.absolutePath, text)
             }
-            if (text == null) return@Tool listOf(UIMessagePart.Text("File not found: ${file.absolutePath}"))
-            val lines = if (text.isEmpty()) 0L else {
-                val count = text.count { it == '\n' }.toLong()
-                if (text.last() != '\n') count + 1 else count
-            }
+            if (text == null) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: ${file.absolutePath}"))
+            val lines = if (text.isEmpty()) 0L else { val c = text.count { it == '\n' }.toLong(); if (text.last() != '\n') c + 1 else c }
             val words = text.split(Regex("\\s+")).count { it.isNotBlank() }.toLong()
-            val chars = text.length.toLong()
-            val bytes = text.encodeToByteArray().size.toLong()
-            val result = JsonObject().apply {
-                addProperty("lines", lines)
-                addProperty("words", words)
-                addProperty("characters", chars)
-                addProperty("bytes", bytes)
+            listOf(UIMessagePart.Text(JsonObject().apply {
+                addProperty("lines", lines); addProperty("words", words)
+                addProperty("characters", text.length.toLong()); addProperty("bytes", text.encodeToByteArray().size.toLong())
                 addProperty("path", file.absolutePath)
-            }.toString()
-            listOf(UIMessagePart.Text(result))
+            }.toString()))
         },
     )
 
     private val stat = Tool(
         name = "stat",
-        description = "Get file metadata (size, permissions, modified time, extension, parent). Accepts path/filePath/file.",
+        description = "Get file metadata: size, permissions, modified time, extension, parent. " +
+            "Returns JSON. Use to check if a file exists or verify file details before editing. " +
+            "Example: {\"path\": \"src/main.kt\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("path") { put("type", "string"); put("description", "Absolute or relative path to the file") }
-                    putJsonObject("filePath") { put("type", "string"); put("description", "Alternative to path") }
-                    putJsonObject("file") { put("type", "string"); put("description", "Alternative to path") }
+                    putJsonObject("path") { put("type", "string"); put("description", "Absolute or workspace-relative path") }
                 },
-                required = emptyList(),
+                required = listOf("path"),
             )
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val path = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("Missing path/filePath/file"))
-            val file = ideService.resolvePath(path) ?: return@Tool listOf(UIMessagePart.Text("Path not found: $path"))
+            val path = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
+            val file = ideService.resolvePath(path)
+            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $path"))
             val exists = file.exists()
-            val result = JsonObject().apply {
-                addProperty("path", file.absolutePath)
-                addProperty("name", file.name)
+            listOf(UIMessagePart.Text(JsonObject().apply {
+                addProperty("path", file.absolutePath); addProperty("name", file.name)
                 addProperty("exists", exists)
                 addProperty("isDirectory", if (exists) file.isDirectory else false)
                 addProperty("isFile", if (exists) file.isFile else false)
                 addProperty("isHidden", if (exists) file.isHidden else false)
-                addProperty("isReadable", file.canRead())
-                addProperty("isWritable", file.canWrite())
+                addProperty("isReadable", file.canRead()); addProperty("isWritable", file.canWrite())
                 addProperty("isExecutable", file.canExecute())
                 addProperty("size", if (exists) file.length() else 0)
-                addProperty("sizeHuman", if (exists) humanReadableSize(file.length()) else "0 B")
-                addProperty("lastModified", if (exists) file.lastModified() else 0)
-                addProperty("extension", file.extension)
-                addProperty("parent", file.parent)
-            }.toString()
-            listOf(UIMessagePart.Text(result))
-        },
-    )
-
-    private val readAndEdit = Tool(
-        name = "readAndEdit",
-        description = "Read a file, apply a single edit, then return the file content before and after. Saves one round-trip over readFile + editFile + readFile.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("filePath") { put("type", "string"); put("description", "Absolute path to the file") }
-                    putJsonObject("oldString") { put("type", "string"); put("description", "The exact text to find. Must match whitespace exactly. Include surrounding lines for uniqueness.") }
-                    putJsonObject("newString") { put("type", "string"); put("description", "The replacement text. Can be empty to delete oldString.") }
-                    putJsonObject("replaceAll") { put("type", "boolean"); put("description", "Replace all occurrences (default: false)") }
-                },
-                required = listOf("filePath", "oldString", "newString"),
-            )
-        },
-        execute = { args ->
-            val obj = args.asJsonObject
-            val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing filePath"))
-            val oldString = obj["oldString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing oldString"))
-            val newString = obj["newString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing newString"))
-            val replaceAll = obj["replaceAll"]?.asJsonPrimitive?.asBoolean ?: false
-
-            val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text("Path could not be resolved: $filePath"))
-            val resolvedPath = file.absolutePath
-
-            val cached = fileContentCache.get(resolvedPath)
-            val content = cached ?: ideService.getFileContent(resolvedPath, null, null)
-            if (content == null) return@Tool listOf(UIMessagePart.Text("File not found: $resolvedPath"))
-            if (cached == null) fileContentCache.put(resolvedPath, content)
-
-            var matchCount = 0
-            var searchIdx = 0
-            while (true) {
-                searchIdx = content.indexOf(oldString, searchIdx)
-                if (searchIdx == -1) break
-                matchCount++
-                searchIdx += oldString.length
-            }
-
-            if (matchCount == 0) {
-                return@Tool listOf(UIMessagePart.Text("Text not found in $resolvedPath. Ensure the whitespace in oldString matches the file exactly."))
-            }
-            if (matchCount > 1 && !replaceAll) {
-                return@Tool listOf(UIMessagePart.Text(
-                    "Found $matchCount matches in $resolvedPath. " +
-                    "Use replaceAll=true or add more surrounding context to oldString for a unique match."
-                ))
-            }
-
-            val result = content.replace(oldString, newString)
-            ideService.writeFile(file, result)
-            fileContentCache.invalidate(resolvedPath)
-
-            val note = if (replaceAll) " (replaced all $matchCount occurrences)" else ""
-            listOf(UIMessagePart.Text("Before:\n$content\n\nAfter:\n$result\n\nEdited $resolvedPath$note"))
+                addProperty("extension", file.extension); addProperty("parent", file.parent)
+            }.toString()))
         },
     )
 
     val all: List<Tool> = listOf(
         readFile, readFiles, readAndEdit, writeFile, editFile, multiEditFile, applyBatchEdits,
-        createFile, deleteFile, renameFile,
-        listFiles, findFiles,
-        tail, wc, stat,
+        createFile, deleteFile, renameFile, listFiles, findFiles, tail, wc, stat,
     )
 
     private fun humanReadableSize(bytes: Long): String {
         if (bytes < 1024) return "$bytes B"
         val units = arrayOf("KB", "MB", "GB", "TB")
         var size = bytes.toDouble()
-        for (unit in units) {
-            size /= 1024.0
-            if (size < 1024.0) return "%.1f %s".format(size, unit)
-        }
+        for (unit in units) { size /= 1024.0; if (size < 1024.0) return "%.1f %s".format(size, unit) }
         return "%.1f PB".format(size)
     }
 }

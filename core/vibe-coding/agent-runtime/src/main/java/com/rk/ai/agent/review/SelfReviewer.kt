@@ -151,26 +151,17 @@ class SelfReviewer {
                 }
             }
 
-            // Quality patterns
+            // Quality patterns — using regex to avoid false positives
             val qualityPatterns = listOf(
-                "TODO" to "TODO left in code",
-                "FIXME" to "FIXME needs attention",
-                "HACK" to "HACK in code - likely needs cleanup",
-                "XXX" to "XXX marker in code",
-                "printStackTrace" to "printStackTrace should not be used in production",
-                "System.out" to "System.out.println in code - use proper logging",
-                "e.printStackTrace" to "printStackTrace in catch block",
-                "catch (Exception" to "Too broad exception catch",
-                "catch (Throwable" to "Catching Throwable is dangerous",
-                "null!" to "Null assertion (!) may cause NPE",
-                "as " to "Unsafe cast - prefer safe cast (as?)",
-                "@Suppress" to "Suppressed warnings",
-                "// TODO" to "Unfinished implementation",
+                Regex("""(?i)\b " left code Regex""(?i)\bFIXME\bIXME needs",
+ Regex("(?)\ACKb""") to "HACK in code - likely needs",
+ Regex""bXXX""StackTrace",
+                Regex("""System\.out\.""") to "System logging\.StackTrace""") to "printStackTrace in",
+\s*\(\Exception"" "("satching Regex toNull assertion () may cause NPE",
+                Regex("<])ass+""") to "Unsafe cast - prefer safe cast (as?)",
+                Regex("""@Suppress""") to "Suppressed warnings",
             )
-            for ((pattern, warning) in qualityPatterns) {
-                if (outputText.contains(pattern)) {
-                    qualityFlags.add("$warning (match: '$pattern')")
-                }
+            for ((pattern, warning in quality ifTextwarning '${pattern.pattern}')")
             }
         }
 

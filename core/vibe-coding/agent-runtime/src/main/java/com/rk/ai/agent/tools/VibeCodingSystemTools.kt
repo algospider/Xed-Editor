@@ -24,52 +24,58 @@ class VibeCodingSystemTools(
 
     private val getIdeInfo = Tool(
         name = "getIdeInfo",
-        description = "Returns IDE name, version, and current workspace path.",
+        description = "Returns IDE info: name, workspace path, open files list. " +
+            "Quick orientation when you're unsure about the current environment. " +
+            "Example: no args needed.",
         execute = { _ ->
             val openFiles = ideService.getOpenFiles()
             val workspace = ideService.getPrimaryWorkspacePath()
-            val text = buildString {
+            listOf(UIMessagePart.Text(buildString {
                 appendLine("IDE: Xed-Editor")
                 appendLine("Workspace: $workspace")
                 appendLine("Open files: ${openFiles.size}")
                 openFiles.forEach { appendLine("  - ${it["path"]?.asString ?: "?"}") }
-                appendLine("Guidelines: Call 'getGuidelines' for instructions on using all available tools.")
-            }
-            listOf(UIMessagePart.Text(text))
+                appendLine("Tip: Call getProjectSummary for full project overview.")
+            }))
         },
     )
 
     private val showMessage = Tool(
         name = "showMessage",
-        description = "Displays a short toast notification message to the user.",
+        description = "Display a short toast notification to the user. " +
+            "Use to communicate progress or request attention. " +
+            "Example: {\"message\": \"Build complete!\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("message") { put("type", "string"); put("description", "Message text to display") }
+                    putJsonObject("message") { put("type", "string"); put("description", "Short notification message to display") }
                 },
                 required = listOf("message"),
             )
         },
         execute = { args ->
             val message = args.asJsonObject["message"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("Error: missing required argument 'message'"))
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'message'."))
             ideService.showMessage(message)
-            listOf(UIMessagePart.Text("Message displayed: \"$message\""))
+            listOf(UIMessagePart.Text("OK Toast: \"$message\""))
         },
     )
 
     private val getEnvironment = Tool(
         name = "getEnvironment",
-        description = "Returns system and sandbox environment variables.",
+        description = "Returns environment variables. Useful for debugging configuration. " +
+            "Example: no args needed.",
         execute = { _ ->
-            val text = System.getenv().entries.joinToString("\n") { "${it.key}=${it.value}" }
-            listOf(UIMessagePart.Text(text.ifEmpty { "No environment variables available" }))
+            val vars = System.getenv().entries.joinToString("\n") { "${it.key}=${it.value}" }
+            listOf(UIMessagePart.Text(vars.ifEmpty { "(no env vars)" }))
         },
     )
 
     private val getClipboard = Tool(
         name = "getClipboard",
-        description = "Returns the current device clipboard content.",
+        description = "Read the device clipboard text. " +
+            "Use when the user says they've copied something. " +
+            "Example: no args needed.",
         execute = { _ ->
             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             val text = cm?.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
@@ -79,7 +85,9 @@ class VibeCodingSystemTools(
 
     private val writeToClipboard = Tool(
         name = "writeToClipboard",
-        description = "Sets the device clipboard content.",
+        description = "Copy text to the device clipboard. " +
+            "Use when the user wants to copy something. " +
+            "Example: {\"text\": \"code snippet to copy\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -90,17 +98,19 @@ class VibeCodingSystemTools(
         },
         execute = { args ->
             val text = args.asJsonObject["text"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("Error: missing required argument 'text'"))
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'text'."))
             val cm = context?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                ?: return@Tool listOf(UIMessagePart.Text("Error: clipboard unavailable (no UI context)"))
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Clipboard unavailable"))
             cm.setPrimaryClip(ClipData.newPlainText("VibeCoding", text))
-            listOf(UIMessagePart.Text("Copied to clipboard"))
+            listOf(UIMessagePart.Text("OK Copied (${text.length} chars)"))
         },
     )
 
     private val getGuidelines = Tool(
         name = "getGuidelines",
-        description = "CRITICAL: Returns the system instructions and best practices for using VibeCoding. Call this if you are unsure how to proceed.",
+        description = "CRITICAL: Full system instructions — tool usage guide, workflow, best practices. " +
+            "Call this if unsure how to proceed or which tool to use. Contains the complete tool reference. " +
+            "Example: no args needed.",
         execute = { _ ->
             listOf(UIMessagePart.Text(SYSTEM_INSTRUCTIONS))
         },

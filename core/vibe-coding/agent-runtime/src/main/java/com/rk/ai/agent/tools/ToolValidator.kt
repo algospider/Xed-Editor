@@ -36,12 +36,16 @@ class ToolValidator {
         val errors = mutableListOf<String>()
 
         val argsObj = if (args.isJsonObject) args.getAsJsonObject() else {
-            return ValidationResult.error("Arguments must be a JSON object, got ${args::class.simpleName}")
+            return ValidationResult.error(
+                "Arguments must be a JSON object, got ${args::class.simpleName}. " +
+                "Example: {\"path\": \"src/main.kt\"}"
+            )
         }
 
         for (field in requiredFields) {
             if (!argsObj.has(field) || argsObj.get(field).isJsonNull) {
-                errors.add("Missing required field '$field'")
+                val expectedType = properties[field]?.jsonObject?.get("type")?.jsonPrimitive?.contentOrNull
+                errors.add("Missing required field '$field' (expected type: ${expectedType ?: "any"})")
             }
         }
 
@@ -55,19 +59,19 @@ class ToolValidator {
 
             when (expectedType) {
                 "string" -> if (!actual.isJsonPrimitive || !actual.getAsJsonPrimitive().isString) {
-                    errors.add("Field '$key' must be a string")
+                    errors.add("Field '$key' must be a string, got ${actual::class.simpleName}")
                 }
                 "integer", "number" -> if (!actual.isJsonPrimitive || !actual.getAsJsonPrimitive().isNumber) {
-                    errors.add("Field '$key' must be a number")
+                    errors.add("Field '$key' must be a number, got ${actual::class.simpleName}")
                 }
                 "boolean" -> if (!actual.isJsonPrimitive || !actual.getAsJsonPrimitive().isBoolean) {
-                    errors.add("Field '$key' must be a boolean")
+                    errors.add("Field '$key' must be a boolean, got ${actual::class.simpleName}")
                 }
                 "array" -> if (!actual.isJsonArray) {
-                    errors.add("Field '$key' must be an array")
+                    errors.add("Field '$key' must be an array, got ${actual::class.simpleName}. Use [] brackets.")
                 }
                 "object" -> if (!actual.isJsonObject) {
-                    errors.add("Field '$key' must be an object")
+                    errors.add("Field '$key' must be an object, got ${actual::class.simpleName}. Use {} braces.")
                 }
             }
         }

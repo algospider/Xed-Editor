@@ -24,30 +24,19 @@ private val REPO_FORMAT = Regex("^[\\w.-]+/[\\w.-]+\$")
 
 class VibeCodingGitHubTools(private val ideService: IdeService) {
 
-    // ── Helpers ────────────────────────────────────────────────────────────
-
     private fun validateRepo(repo: String): UIMessagePart.Text? =
         if (!repo.matches(REPO_FORMAT))
-            UIMessagePart.Text("Repo must be in 'owner/repo' format (e.g. 'torvalds/linux')")
+            UIMessagePart.Text("ERROR: Repo must be in 'owner/repo' format (e.g. 'torvalds/linux'). You passed: '$repo'")
         else null
 
-    /**
-     * Decodes the Base64-encoded file content returned by the GitHub Contents API.
-     * Returns null if the field is absent.
-     */
     private fun JsonObject.decodeBase64Content(): String? {
         val raw = get("content")?.asString?.replace("\n", "") ?: return null
         return java.util.Base64.getDecoder().decode(raw).toString(Charsets.UTF_8)
     }
 
-    /**
-     * Performs a GET request against the GitHub API and returns the response body as a String.
-     * Handles rate-limiting (403) and not-found (404) explicitly.
-     * Closes the connection in all code paths.
-     */
     private fun githubApiGet(urlStr: String): String {
         val conn = URI(urlStr).toURL().openConnection() as HttpURLConnection
-        try {
+        return try {
             conn.connectTimeout = GITHUB_API_TIMEOUT_MS
             conn.readTimeout = GITHUB_API_TIMEOUT_MS
             conn.setRequestProperty("User-Agent", "Xed-Editor/2.0")
@@ -64,21 +53,20 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
             }
             if (responseCode == 404) throw RuntimeException("Not found (404)")
 
-            return BufferedReader(
-                InputStreamReader(
-                    if (responseCode in 200..299) conn.inputStream else conn.errorStream,
-                )
-            ).use { it.readText() }
+            val stream = if (responseCode in 200..299) conn.inputStream else conn.errorStream
+            stream.bufferedReader().use { it.readText() }
         } finally {
+            try { conn.errorStream?.use { it.readBytes() } } catch (_: Exception) { }
+            try { conn.inputStream?.use { it.readBytes() } } catch (_: Exception) { }
             conn.disconnect()
         }
     }
 
-    // ── Tool definitions ───────────────────────────────────────────────────
-
     private val githubRepoInfo = Tool(
         name = "github_repo_info",
-        description = "Gets information about a GitHub repository (stars, forks, description, etc.).",
+        description = "Get GitHub repo metadata: stars, forks, description, language, license, topics. " +
+            "Use to check a project's popularity, tech stack, or license before using it. " +
+            "Example: {\"repo\": \"anomalyco/opencode\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -89,32 +77,37 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
         },
         execute = { args ->
             val repo = args.asJsonObject["repo"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("Missing repo"))
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'repo'. Format: owner/repo"))
             validateRepo(repo)?.let { return@Tool listOf(it) }
 
-            val data = JsonParser.parseString(githubApiGet("$GITHUB_API/repos/$repo")).asJsonObject
-
-            val text = buildString {
-                appendLine("Repository: ${data.get("full_name")?.asString ?: repo}")
-                appendLine("Description: ${data.get("description")?.asString ?: "N/A"}")
-                appendLine("Stars: ${data.get("stargazers_count")?.asInt ?: 0}")
-                appendLine("Forks: ${data.get("forks_count")?.asInt ?: 0}")
-                appendLine("Open Issues: ${data.get("open_issues_count")?.asInt ?: 0}")
-                appendLine("Language: ${data.get("language")?.asString ?: "N/A"}")
-                appendLine("License: ${data.getAsJsonObject("license")?.get("spdx_id")?.asString ?: "N/A"}")
-                appendLine("Topics: ${data.getAsJsonArray("topics")?.joinToString(", ") { it.asString } ?: "none"}")
-                appendLine("URL: ${data.get("html_url")?.asString ?: ""}")
-                appendLine("Default Branch: ${data.get("default_branch")?.asString ?: "main"}")
-                val pushedAt = data.get("pushed_at")?.asString ?: ""
-                if (pushedAt.isNotBlank()) appendLine("Last Push: $pushedAt")
+            try {
+                val data = JsonParser.parseString(githubApiGet("$GITHUB_API/repos/$repo")).asJsonObject
+                val text = buildString {
+                    appendLine("Repository: ${data.get("full_name")?.asString ?: repo}")
+                    appendLine("Description: ${data.get("description")?.asString ?: "N/A"}")
+                    appendLine("Stars: ${data.get("stargazers_count")?.asInt ?: 0}")
+                    appendLine("Forks: ${data.get("forks_count")?.asInt ?: 0}")
+                    appendLine("Open Issues: ${data.get("open_issues_count")?.asInt ?: 0}")
+                    appendLine("Language: ${data.get("language")?.asString ?: "N/A"}")
+                    appendLine("License: ${data.getAsJsonObject("license")?.get("spdx_id")?.asString ?: "N/A"}")
+                    appendLine("Topics: ${data.getAsJsonArray("topics")?.joinToString(", ") { it.asString } ?: "none"}")
+                    appendLine("URL: ${data.get("html_url")?.asString ?: ""}")
+                    appendLine("Default Branch: ${data.get("default_branch")?.asString ?: "main"}")
+                    val pushedAt = data.get("pushed_at")?.asString ?: ""
+                    if (pushedAt.isNotBlank()) appendLine("Last Push: $pushedAt")
+                }
+                listOf(UIMessagePart.Text(text))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: $repo — ${e.message ?: "GitHub API call failed"}. SUGGESTION: Check the repo name and your internet connection."))
             }
-            listOf(UIMessagePart.Text(text))
         },
     )
 
     private val githubReadme = Tool(
         name = "github_readme",
-        description = "Fetches the README content of a GitHub repository.",
+        description = "Fetch the README of a GitHub repo (raw markdown content). " +
+            "Use to understand a project's purpose, installation, and usage. " +
+            "Example: {\"repo\": \"anomalyco/opencode\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -125,19 +118,26 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
         },
         execute = { args ->
             val repo = args.asJsonObject["repo"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("Missing repo"))
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'repo'. Format: owner/repo"))
             validateRepo(repo)?.let { return@Tool listOf(it) }
 
-            val data = JsonParser.parseString(githubApiGet("$GITHUB_API/repos/$repo/readme")).asJsonObject
-            val decoded = data.decodeBase64Content()
-                ?: return@Tool listOf(UIMessagePart.Text("No README content found"))
-            listOf(UIMessagePart.Text(decoded))
+            try {
+                val data = JsonParser.parseString(githubApiGet("$GITHUB_API/repos/$repo/readme")).asJsonObject
+                val decoded = data.decodeBase64Content()
+                    ?: return@Tool listOf(UIMessagePart.Text("No README content found for $repo"))
+                listOf(UIMessagePart.Text(decoded))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: $repo README — ${e.message ?: "fetch failed"}. SUGGESTION: Check repo name."))
+            }
         },
     )
 
     private val githubFileFetch = Tool(
         name = "github_file_fetch",
-        description = "Fetches a specific file from a GitHub repository.",
+        description = "Fetch a specific file from a GitHub repo by path. Optionally specify a branch. " +
+            "Use to read source files from GitHub without cloning the repo. " +
+            "Example: {\"repo\": \"anomalyco/opencode\", \"path\": \"README.md\"} " +
+            "Example with branch: {\"repo\": \"torvalds/linux\", \"path\": \"Makefile\", \"branch\": \"master\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -150,8 +150,8 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val repo = obj["repo"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing repo"))
-            val filePath = obj["path"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing path"))
+            val repo = obj["repo"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'repo'. Format: owner/repo"))
+            val filePath = obj["path"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
             val branch = obj["branch"]?.asJsonPrimitive?.asString.orEmpty()
 
             val url = buildString {
@@ -159,21 +159,28 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
                 if (branch.isNotBlank()) append("?ref=$branch")
             }
 
-            val data = JsonParser.parseString(githubApiGet(url)).asJsonObject
-            val decoded = data.decodeBase64Content()
-                ?: return@Tool listOf(UIMessagePart.Text("Not a file or no content"))
-            listOf(UIMessagePart.Text(decoded))
+            try {
+                val data = JsonParser.parseString(githubApiGet(url)).asJsonObject
+                val decoded = data.decodeBase64Content()
+                    ?: return@Tool listOf(UIMessagePart.Text("ERROR: Not a file or no content at $repo/$filePath. SUGGESTION: Use a path to a file, not a directory."))
+                listOf(UIMessagePart.Text(decoded))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: $repo/$filePath — ${e.message ?: "fetch failed"}. SUGGESTION: Check path, repo, and branch."))
+            }
         },
     )
 
     private val githubSearchCode = Tool(
         name = "github_search_code",
-        description = "Searches code on GitHub using the search API.",
+        description = "Search code on GitHub using the search API. Optionally scope to a repo. " +
+            "Use to find how projects implement specific patterns or use APIs. " +
+            "Example: {\"query\": \"suspend function\", \"limit\": 5} " +
+            "Scoped: {\"query\": \"class Tool\", \"repo\": \"anomalyco/opencode\", \"limit\": 10}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("query") { put("type", "string"); put("description", "Search query") }
-                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 10)") }
+                    putJsonObject("limit") { put("type", "integer"); put("description", "Maximum results (default: 10, max: 50)") }
                     putJsonObject("repo") { put("type", "string"); put("description", "Limit search to a specific repository (owner/repo)") }
                 },
                 required = listOf("query"),
@@ -181,28 +188,33 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing query"))
+            val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'query'."))
             val limit = (obj["limit"]?.asJsonPrimitive?.asInt ?: 10).coerceIn(1, 50)
             val repo = obj["repo"]?.asJsonPrimitive?.asString.orEmpty()
 
             val q = if (repo.isNotBlank()) "$query+repo:$repo" else query
             val url = "$GITHUB_API/search/code?q=${java.net.URLEncoder.encode(q, "UTF-8")}&per_page=$limit"
-            val data = JsonParser.parseString(githubApiGet(url)).asJsonObject
-            val items = data.getAsJsonArray("items") ?: JsonArray()
+            try {
+                val data = JsonParser.parseString(githubApiGet(url)).asJsonObject
+                val items = data.getAsJsonArray("items") ?: JsonArray()
 
-            val text = buildString {
-                val total = data.get("total_count")?.asInt ?: 0
-                appendLine("Found $total results (showing ${items.size()})")
-                appendLine()
-                items.forEach { item ->
-                    val itemObj = item.asJsonObject
-                    appendLine("File: ${itemObj.get("path")?.asString ?: "?"}")
-                    appendLine("Repo: ${itemObj.getAsJsonObject("repository")?.get("full_name")?.asString ?: "?"}")
-                    appendLine("URL: ${itemObj.get("html_url")?.asString ?: "?"}")
+                val text = buildString {
+                    val total = data.get("total_count")?.asInt ?: 0
+                    appendLine("Found $total results (showing ${items.size()})")
                     appendLine()
+                    if (items.size() == 0) appendLine("No code matches for query: $query")
+                    items.forEach { item ->
+                        val itemObj = item.asJsonObject
+                        appendLine("File: ${itemObj.get("path")?.asString ?: "?"}")
+                        appendLine("Repo: ${itemObj.getAsJsonObject("repository")?.get("full_name")?.asString ?: "?"}")
+                        appendLine("URL: ${itemObj.get("html_url")?.asString ?: "?"}")
+                        appendLine()
+                    }
                 }
+                listOf(UIMessagePart.Text(text))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: GitHub code search — ${e.message ?: "failed"}. SUGGESTION: Simplify your query or check connectivity."))
             }
-            listOf(UIMessagePart.Text(text))
         },
     )
 

@@ -75,6 +75,20 @@ class ExecutionEngine(
                 break
             }
             val argsHash = toolCall.input.take(100)
+
+            // Infinite loop detection at the tool-call level
+            loopDetector.record(ActionRecord(
+                toolName = toolCall.name,
+                inputHash = toolCall.input.hashCode(),
+            ))
+            val loopInfo = loopDetector.detect()
+            if (loopInfo != null) {
+                contextMemory.log("LOOP DETECTED [${loopInfo.severity}]: ${loopInfo.description}")
+                if (loopInfo.severity == LoopSeverity.CRITICAL) {
+                    errors.add("Loop detected: ${loopInfo.suggestion}")
+                    break
+                }
+            }
             val cached = toolCache.get(toolCall.name, argsHash)
             if (cached != null) {
                 contextMemory.log("Cache hit: ${toolCall.name}")
@@ -139,25 +153,6 @@ class ExecutionEngine(
             }
         }
 
-        loopDetector.record(ActionRecord(
-            toolName = task.title,
-            inputHash = task.description.hashCode(),
-        ))
-        val loopInfo = loopDetector.detect()
-        if (loopInfo != null) {
-            contextMemory.log("LOOP DETECTED [${loopInfo.severity}]: ${loopInfo.description}")
-            if (loopInfo.severity == LoopSeverity.CRITICAL) {
-                errors.add("Loop detected: ${loopInfo.suggestion}")
-                return ExecutionResult(
-                    taskId = task.id,
-                    success = false,
-                    message = "Aborted due to infinite loop: ${loopInfo.description}",
-                    modifiedFiles = modifiedFiles.distinct(),
-                    errors = errors,
-                )
-            }
-        }
-
         return ExecutionResult(
             taskId = task.id,
             success = errors.size <= 2,
@@ -182,13 +177,62 @@ class ExecutionEngine(
     private fun extractToolCalls(response: String): List<ToolCallInfo> {
         val calls = mutableListOf<ToolCallInfo>()
 
-        // 1: JSON tool call format: {"tool": "name", "arguments": {"key": "val"}} on its own line
-        val jsonRegex = Regex("""\{[^}]*?"tool"\s*:\s*"(\w+)"[^}]*?"arguments"\s*:\s*(\{.*?\})\s*\}""", RegexOption.DOT_MATCHES_ALL)
-        for (match in jsonRegex.findAll(response)) {
-            calls.add(ToolCallInfo(match.groupValues[1], match.groupValues[2]))
+        // Strategy 1: Find JSON tool-call blocks using balanced-brace scanning
+        // This properly handles nested JSON objects unlike regex.
+        var searchStart = 0
+        while (true) {
+            val toolKeyIdx = response.indexOf("\"tool\"", searchStart)
+            if (toolKeyIdx == -1) break
+
+            // Find the enclosing object by scanning backwards for '{'
+            val blockStart = response.lastIndexOf('{', toolKeyIdx)
+            if (blockStart == -1 || blockStart < searchStart - 1) {
+                searchStart = toolKeyIdx + 1
+                continue
+            }
+
+            // Find the matching closing '}' using brace-depth counting
+            var depth = 0
+            var blockEnd = -1
+            var inString = false
+            var escape = false
+            for (i in blockStart until response.length) {
+                val ch = response[i]
+                if (escape) { escape = false; continue }
+                if (ch == '\\') { escape = true; continue }
+                if (ch == '"') { inString = !inString; continue }
+                if (inString) continue
+                when (ch) {
+                    '{' -> depth++
+                    '}' -> {
+                        depth--
+                        if (depth == 0) { blockEnd = i; break }
+                    }
+                }
+            }
+            if (blockEnd == -1) { searchStart = toolKeyIdx + 1; continue }
+
+            val blockJson = response.substring(blockStart, blockEnd + 1)
+            searchStart = blockEnd + 1
+
+            try {
+                val parsed = JsonParser.parseString(blockJson).asJsonObject
+                val toolName = parsed.get("tool")?.asString ?: continue
+                val arguments = parsed.get("arguments")
+                val argsStr = if (arguments != null && arguments.isJsonObject) {
+                    arguments.asJsonObject.toString()
+                } else if (arguments != null && arguments.isJsonPrimitive) {
+                    arguments.asString
+                } else {
+                    "{}"
+                }
+                calls.add(ToolCallInfo(toolName, argsStr))
+            } catch (_: Exception) {
+                // Not valid JSON; continue searching
+            }
         }
 
-        // 2: XML-like format (legacy): <tool_call><tool_name>name</tool_name><parameters>{...}</parameters></tool_call>
+        // Strategy 2: XML-like format (legacy)
         if (calls.isEmpty()) {
             val xmlRegex = Regex("""<(\w+_call)>\s*<tool_name>\s*(\w+)\s*</tool_name>\s*<parameters>\s*(\{.*?\})?\s*</parameters>\s*</\1>""", RegexOption.DOT_MATCHES_ALL)
             for (match in xmlRegex.findAll(response)) {
@@ -196,15 +240,39 @@ class ExecutionEngine(
             }
         }
 
-        // 3: Simple prose format (last resort): "use toolName with args: {...}"
+        // Strategy 3: Prose format "use|call|invoke toolName with args: {...}"
         if (calls.isEmpty()) {
-            val simpleRegex = Regex("""(?:use|call|invoke)\s+(\w+)\s*(?:with\s+args?\s*:\s*(\{.*?\}))?""", RegexOption.IGNORE_CASE)
-            for (match in simpleRegex.findAll(response)) {
-                calls.add(ToolCallInfo(match.groupValues[1], match.groupValues[2].ifBlank { "{}" }))
+            // Find balanced JSON objects after "with args:"
+            val prosePrefixRegex = Regex("""(?:use|call|invoke)\s+(\w+)\s*(?:with\s+args?\s*:)?""", RegexOption.IGNORE_CASE)
+            for (match in prosePrefixRegex.findAll(response)) {
+                val toolName = match.groupValues[1]
+                val afterMatch = response.substring(match.range.last + 1).trimStart()
+                if (afterMatch.startsWith('{')) {
+                    var depth = 0
+                    var end = -1
+                    var inStr = false
+                    var esc = false
+                    for (i in afterMatch.indices) {
+                        val ch = afterMatch[i]
+                        if (esc) { esc = false; continue }
+                        if (ch == '\\') { esc = true; continue }
+                        if (ch == '"') { inStr = !inStr; continue }
+                        if (inStr) continue
+                        when (ch) {
+                            '{' -> depth++
+                            '}' -> { depth--; if (depth == 0) { end = i; break } }
+                        }
+                    }
+                    if (end != -1) {
+                        calls.add(ToolCallInfo(toolName, afterMatch.substring(0, end + 1)))
+                    }
+                } else {
+                    calls.add(ToolCallInfo(toolName, "{}"))
+                }
             }
         }
 
-        return calls.distinctBy { it.name }
+        return calls.distinctBy { it.name + it.input.take(50) }
     }
 
     private fun extractFilePath(input: String): String? {
