@@ -44,22 +44,25 @@ class ProjectService(private val tabRepo: TabRepository, private val viewModel: 
         val vm = searchViewModel()
         val mv = viewModel ?: return JsonArray()
 
-        val root = if (path != null) {
-            resolvePath(path) ?: File(IdeBridge.primaryWorkspacePath())
-        } else {
-            File(IdeBridge.primaryWorkspacePath())
-        }
+        val resolvedPath = path?.let { resolvePath(it) }
+        val scopeRoot = resolvedPath?.let { if (it.isFile) it.parentFile else it }
+            ?: File(IdeBridge.primaryWorkspacePath())
 
         val results = withContext(Dispatchers.IO) {
             vm.searchCode(
                 context = app, mainViewModel = mv,
-                projectRoot = root.toFileWrapper(),
+                projectRoot = scopeRoot.toFileWrapper(),
                 query = query, useIndex = Settings.always_index_projects && path == null && !isRegex,
                 isRegex = isRegex
             ).take(limit.coerceAtLeast(1)).toList()
         }
+
+        val filtered = if (resolvedPath?.isFile == true) {
+            results.filter { it.file.absolutePath == resolvedPath.absolutePath }
+        } else results
+
         return JsonArray().apply {
-            results.forEach { item ->
+            filtered.forEach { item ->
                 add(JsonObject().apply {
                     addProperty("path", item.file.getAbsolutePath())
                     addProperty("line", item.line + 1)
@@ -75,11 +78,9 @@ class ProjectService(private val tabRepo: TabRepository, private val viewModel: 
         val vm = searchViewModel()
         val mv = viewModel ?: return JsonArray()
 
-        val root = if (path != null) {
-            resolvePath(path) ?: File(IdeBridge.primaryWorkspacePath())
-        } else {
-            File(IdeBridge.primaryWorkspacePath())
-        }
+        val resolvedPath = path?.let { resolvePath(it) }
+        val scopeRoot = resolvedPath?.let { if (it.isFile) it.parentFile else it }
+            ?: File(IdeBridge.primaryWorkspacePath())
 
         val declarationPattern = Regex(
             "\\b(class|interface|object|fun|def|function|var|val|let|const|enum|struct|type)\\s+${Regex.escape(query)}\\b",
@@ -89,17 +90,21 @@ class ProjectService(private val tabRepo: TabRepository, private val viewModel: 
         val results = withContext(Dispatchers.IO) {
             vm.searchCode(
                 context = app, mainViewModel = mv,
-                projectRoot = root.toFileWrapper(),
+                projectRoot = scopeRoot.toFileWrapper(),
                 query = query, useIndex = false, isRegex = false
             ).take((limit * 3).coerceAtLeast(1)).toList()
         }
 
-        val filtered = results.filter { item ->
+        val scoped = if (resolvedPath?.isFile == true) {
+            results.filter { it.file.absolutePath == resolvedPath.absolutePath }
+        } else results
+
+        val filtered = scoped.filter { item ->
             declarationPattern.containsMatchIn(item.snippet.text.toString())
         }
 
         return JsonArray().apply {
-            val finalResults = if (filtered.size >= limit) filtered else results
+            val finalResults = if (filtered.size >= limit) filtered else scoped
             finalResults.take(limit).forEach { item ->
                 add(JsonObject().apply {
                     addProperty("path", item.file.getAbsolutePath())

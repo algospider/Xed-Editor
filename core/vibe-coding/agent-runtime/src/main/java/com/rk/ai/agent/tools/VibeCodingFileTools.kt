@@ -115,8 +115,12 @@ class VibeCodingFileTools(
 
             val content = ideService.getFileContent(filePath, startLine, endLine)
             if (content != null) {
-                if (startLine == null && endLine == null) fileContentCache.put(filePath, content)
-                listOf(UIMessagePart.Text(content))
+                if (content.isEmpty()) {
+                    listOf(UIMessagePart.Text("(empty file — 0 bytes)"))
+                } else {
+                    if (startLine == null && endLine == null) fileContentCache.put(filePath, content)
+                    listOf(UIMessagePart.Text(content))
+                }
             } else {
                 listOf(UIMessagePart.Text("ERROR: File not found: $rawPath\nSUGGESTION: Verify the file exists with listFiles. If the path is relative, it must be relative to the workspace root."))
             }
