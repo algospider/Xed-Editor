@@ -13,7 +13,7 @@ import com.rk.ai.nativeagent.engine.VibeCodingEngine
 import com.rk.ai.providers.Model
 import com.rk.ai.providers.ModelType
 import com.rk.ai.providers.ProviderSetting
-import com.rk.components.XedBottomSheet
+import com.rk.components.compose.sheet.XedBottomSheet
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.launch

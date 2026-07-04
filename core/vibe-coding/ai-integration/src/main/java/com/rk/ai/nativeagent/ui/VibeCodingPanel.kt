@@ -21,7 +21,7 @@ import com.rk.ai.nativeagent.engine.VibeCodingState
 import com.rk.ai.nativeagent.ui.components.*
 import com.rk.ai.nativeagent.ui.panels.*
 import com.rk.ai.persistence.settings.getCurrentAssistant
-import com.rk.components.XedBottomSheet
+import com.rk.components.compose.sheet.XedBottomSheet
 import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
 
