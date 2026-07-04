@@ -44,8 +44,8 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     api(project(":core:vibe-coding:agent-runtime"))
-    implementation("com.mikepenz:multiplatform-markdown-renderer:0.42.0")
-    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.42.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer:0.41.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.41.0")
 
     testImplementation(libs.junit)
     testImplementation(libs.tests.google.truth)
