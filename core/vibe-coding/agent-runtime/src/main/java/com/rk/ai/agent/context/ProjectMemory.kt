@@ -35,7 +35,8 @@ class ProjectMemory {
     }
 
     fun indexSymbol(name: String, filePath: String) {
-        symbolIndex.getOrPut(name.lowercase()) { mutableListOf() }.add(filePath)
+        val paths = symbolIndex.getOrPut(name.lowercase()) { mutableListOf() }
+        if (filePath !in paths) paths.add(filePath)
     }
 
     fun findSymbol(name: String): List<String> = symbolIndex[name.lowercase()] ?: emptyList()

@@ -198,7 +198,20 @@ class VibeCodingEngine(
         toolCache = toolCache,
         toolRouter = toolRouter,
         projectIndexer = projectIndexer,
-    )
+    ).also { engine ->
+        engine.registerHook(
+            com.rk.ai.agent.hooks.HookEvent.BEFORE_COMMAND,
+            com.rk.ai.agent.hooks.SecurityHook(),
+        )
+        engine.registerHook(
+            com.rk.ai.agent.hooks.HookEvent.BEFORE_FILE_WRITE,
+            com.rk.ai.agent.hooks.SecurityHook(),
+        )
+        engine.registerHook(
+            com.rk.ai.agent.hooks.HookEvent.BEFORE_FILE_EDIT,
+            com.rk.ai.agent.hooks.SecurityHook(),
+        )
+    }
 
     val orchestrator = AgentOrchestrator(
         ideService = ideService,

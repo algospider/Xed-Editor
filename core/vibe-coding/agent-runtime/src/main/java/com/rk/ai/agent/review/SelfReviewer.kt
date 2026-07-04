@@ -133,21 +133,29 @@ class SelfReviewer {
             }
         }
 
-        // Static code analysis on tool output
+        val shortOkTools = setOf(
+            "writeFile", "createFile", "deleteFile", "renameFile",
+            "showMessage", "writeToClipboard", "rejectDiff",
+            "recordSuggestionFeedback",
+        )
+        if (toolName !in shortOkTools && toolName !in listOf("getFileContent", "readFile", "cat")) {
+            if (outputText.length in 1..50 && !outputText.contains("error", ignoreCase = true)) {
+                missingInfo.add("Output seems unexpectedly short (${outputText.length} chars)")
+                suggestions.add("The tool returned very little data - verify the input was correct")
+            }
+        }
+
         if (outputText.isNotBlank()) {
-            // Security patterns
             val securityPatterns = listOf(
-                "apiKey" to "Possible API key in code",
-                "password" to "Possible password in code",
-                "secret" to "Possible secret in code",
-                "token" to "Possible token in code (verify it's not hardcoded)",
-                "Bearer " to "Bearer token - verify it's not hardcoded",
-                "-----BEGIN" to "Possible private key in code",
-                "http://" to "Insecure HTTP URL - should use HTTPS",
+                Regex("""["']api[_-]?key["']\s*[:=]\s*["'][^"']{8,}["']""", RegexOption.IGNORE_CASE) to "Hardcoded API key detected",
+                Regex("""["']password["']\s*[:=]\s*["'][^"']{4,}["']""", RegexOption.IGNORE_CASE) to "Hardcoded password detected",
+                Regex("""["']secret["']\s*[:=]\s*["'][^"']{4,}["']""", RegexOption.IGNORE_CASE) to "Hardcoded secret detected",
+                Regex("""["']token["']\s*[:=]\s*["'][^"']{8,}["']""", RegexOption.IGNORE_CASE) to "Hardcoded token detected",
+                Regex("""-----BEGIN\s+(RSA|DSA|EC|PGP|OPENSSH)\s+PRIVATE\s+KEY-----""") to "Private key in output",
             )
             for ((pattern, warning) in securityPatterns) {
-                if (outputText.contains(pattern, ignoreCase = true)) {
-                    securityChecks.add("$pattern: $warning")
+                if (pattern.containsMatchIn(outputText)) {
+                    securityChecks.add(warning)
                 }
             }
 

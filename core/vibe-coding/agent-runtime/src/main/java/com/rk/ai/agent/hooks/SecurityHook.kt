@@ -19,89 +19,88 @@ class SecurityHook(
 
     private val contentPatterns = listOf(
         SecurityPattern(
-            Regex("""(?i)\byaml\.load\s*\(|yaml\.load_all\s*\("""),
+            Regex.fromLiteral("yaml.load("),
             SecuritySeverity.HIGH,
-            "Unsafe YAML deserialization - can lead to remote code execution",
+            "Unsafe YAML deserialization",
             "Use yaml.safe_load() instead",
         ),
         SecurityPattern(
-            Regex("""(?i)\bpickle\.load\s*\(|pickle\.loads\s*\(|cPickle\.loads?\s*\("""),
+            Regex.fromLiteral("pickle.load("),
             SecuritySeverity.CRITICAL,
-            "Unsafe pickle deserialization - can execute arbitrary code",
-            "Use a safer serialization format like JSON or Protocol Buffers",
+            "Unsafe pickle deserialization",
+            "Use JSON or Protocol Buffers",
         ),
         SecurityPattern(
-            Regex("""(?i)(?:\.innerHTML|\.outerHTML|dangerouslySetInnerHTML)\s*="""),
+            Regex(".innerHTML\\s*=", RegexOption.IGNORE_CASE),
             SecuritySeverity.HIGH,
             "Direct HTML injection (XSS risk)",
-            "Use safe DOM APIs like textContent or a sanitization library",
+            "Use safe DOM APIs like textContent",
         ),
         SecurityPattern(
-            Regex("""(?i)(?:password|secret|api[_-]?key|credential)\s*[:=]\s*['\"][^'"]{4,}['\"]"""),
+            Regex("(password|secret|api[_-]?key|credential)\\s*[:=]\\s*['\"][^'\"]{4,}['\"]", RegexOption.IGNORE_CASE),
             SecuritySeverity.CRITICAL,
             "Hardcoded credential detected",
-            "Use environment variables or a secret manager instead",
+            "Use environment variables or a secret manager",
         ),
         SecurityPattern(
-            Regex("""(?i)\bexec\s*\(|\beval\s*\(|Runtime\.getRuntime\(\)\.exec|ProcessBuilder\s*\("""),
+            Regex("\\bexec\\s*\\(|\\beval\\s*\\(|Runtime\\.getRuntime\\(\\)\\.exec|ProcessBuilder\\s*\\(", RegexOption.IGNORE_CASE),
             SecuritySeverity.HIGH,
             "Dynamic code execution detected",
             "Avoid executing arbitrary strings as code",
         ),
         SecurityPattern(
-            Regex("""(?i)(?:rm\s+-rf(?:\s+|$)|rmdir\s+/s|del\s+/f)"""),
+            Regex("rm\\s+-rf|rmdir\\s+/s|del\\s+/f", RegexOption.IGNORE_CASE),
             SecuritySeverity.CRITICAL,
             "Destructive filesystem command detected",
             "Verify this is intended and the path is controlled",
         ),
         SecurityPattern(
-            Regex("""(?i)\bsql\s*=\s*['\"].*\{.*\b(?:select|insert|update|delete|drop)\b"""),
+            Regex("sql\\s*=\\s*['\"].*\\{.*\\b(?:select|insert|update|delete|drop)\\b", RegexOption.IGNORE_CASE),
             SecuritySeverity.HIGH,
             "SQL injection risk - string interpolation in query",
             "Use parameterized queries or prepared statements",
         ),
         SecurityPattern(
-            Regex("""(?i)(?:path|filePath|directory)\s*[:=]\s*['\"].*\.\.[/\\]"""),
+            Regex("(?:path|filePath|directory)\\s*[:=]\\s*['\"].*\\.\\.[/\\\\]", RegexOption.IGNORE_CASE),
             SecuritySeverity.MEDIUM,
             "Path traversal detected in file path argument",
             "Verify the resolved path is within allowed boundaries",
         ),
     )
 
-    /** Patterns that are checked against command strings passed to runCommand */
     private val commandPatterns = listOf(
         SecurityPattern(
-            Regex("""(?i)\brm\s+-rf\b"""),
+            Regex("rm\\s+-rf", RegexOption.IGNORE_CASE),
             SecuritySeverity.CRITICAL,
             "Destructive filesystem command (rm -rf)",
             "Verify this is intended and the path is controlled",
         ),
         SecurityPattern(
-            Regex("""(?i)\bmkfs\b|\bdd\b\s+if=|>?\s*/dev"),
+            Regex("mkfs\\b|dd\\s+if=|>\\s*/dev|>>\\s*/dev", RegexOption.IGNORE_CASE),
             SecuritySeverity.CRITICAL,
             "Dangerous disk/device operation",
             "Do not run commands that modify disk devices",
         ),
         SecurityPattern(
-            Regex("""(?i)\bcurl\s+.*\|\s*bash\b|\bwget\s+.*\|\s*bash\b|\bcurl\s+.*\|\s*sh\b"""),
+            Regex("curl\\s+.*\\|\\s*bash|wget\\s+.*\\|\\s*bash|curl\\s+.*\\|\\s*sh", RegexOption.IGNORE_CASE),
             SecuritySeverity.CRITICAL,
-            "Piping remote script to shell - potential remote code execution",
+            "Piping remote script to shell",
             "Download the script separately and verify it before running",
         ),
         SecurityPattern(
-            Regex("""(?i):\(\)\s*\{|fork\s+bomb|\\\\x[0-9a-f]{2}\s*\{\s*:"""),
+            Regex(":\\(\\)\\s*\\{|fork\\s+bomb", RegexOption.IGNORE_CASE),
             SecuritySeverity.CRITICAL,
             "Fork bomb or shellshock pattern detected",
             "Do not execute fork bombs or shell exploits",
         ),
         SecurityPattern(
-            Regex("""(?i)\bsudo\b"""),
+            Regex("\\bsudo\\b", RegexOption.IGNORE_CASE),
             SecuritySeverity.HIGH,
             "Sudo command - requires elevated privileges",
             "Avoid using sudo; the agent should operate within user permissions",
         ),
         SecurityPattern(
-            Regex("""(?i)\bchmod\s+777\b"""),
+            Regex("chmod\\s+777", RegexOption.IGNORE_CASE),
             SecuritySeverity.HIGH,
             "Overly permissive file permissions",
             "Avoid 777 permissions; use more restrictive modes",
@@ -109,7 +108,6 @@ class SecurityHook(
     )
 
     override suspend fun evaluate(context: HookContext): HookResult {
-        // Check command strings (runCommand tool)
         if (context.command != null) {
             val cmdFindings = commandPatterns.filter { it.pattern.containsMatchIn(context.command) }
             if (cmdFindings.isNotEmpty()) {
@@ -130,7 +128,6 @@ class SecurityHook(
             return HookResult.Allow
         }
 
-        // Check file content (writeFile, editFile, etc.)
         val content = context.newContent ?: context.args["content"]?.toString() ?: return HookResult.Allow
 
         val findings = contentPatterns.filter { it.pattern.containsMatchIn(content) }

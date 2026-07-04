@@ -1,8 +1,13 @@
 package com.rk.ai.agent.executor
 
 import android.util.Log
+import com.rk.ai.agent.RecoveryEngine
 import com.rk.ai.agent.context.ContextBundle
 import com.rk.ai.agent.context.ContextMemoryManager
+import com.rk.ai.agent.hooks.HookContext
+import com.rk.ai.agent.hooks.HookEvent
+import com.rk.ai.agent.hooks.HookManager
+import com.rk.ai.agent.hooks.HookResult
 import com.rk.ai.agent.indexer.ProjectIndexer
 import com.rk.ai.agent.indexer.ProjectKnowledgeBase
 import com.rk.ai.agent.planner.TaskNode
@@ -23,6 +28,7 @@ import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.isActive
 
 private const val TAG = "ExecutionEngine"
+private const val MAX_ERRORS = 0
 
 data class ExecutionResult(
     val taskId: String,
@@ -41,7 +47,13 @@ class ExecutionEngine(
 ) {
     private val selfReviewer = SelfReviewer()
     private val loopDetector = InfiniteLoopDetector()
+    private val recoveryEngine = RecoveryEngine()
+    private val hookManager = HookManager()
     private var knowledgeBase: ProjectKnowledgeBase? = null
+
+    fun registerHook(event: HookEvent, hook: com.rk.ai.agent.hooks.ToolHook) {
+        hookManager.register(event, hook)
+    }
 
     suspend fun initialize(workspacePath: String) {
         val index = projectIndexer.index(workspacePath)
@@ -53,6 +65,22 @@ class ExecutionEngine(
             contextMemory.storeSymbol(sym.name, sym.file)
         }
         Log.i(TAG, "Indexed ${index.files.size} files, ${index.symbols.size} symbols")
+    }
+
+    private suspend fun checkHooks(
+        event: HookEvent,
+        toolName: String? = null,
+        filePath: String? = null,
+        newContent: String? = null,
+        command: String? = null,
+    ): HookResult {
+        return hookManager.checkAll(event, HookContext(
+            event = event,
+            toolName = toolName,
+            filePath = filePath,
+            newContent = newContent,
+            command = command,
+        ))
     }
 
     suspend fun executeTask(
@@ -76,7 +104,6 @@ class ExecutionEngine(
             }
             val argsHash = toolCall.input.take(100)
 
-            // Infinite loop detection at the tool-call level
             loopDetector.record(ActionRecord(
                 toolName = toolCall.name,
                 inputHash = toolCall.input.hashCode(),
@@ -89,16 +116,17 @@ class ExecutionEngine(
                     break
                 }
             }
-            val cached = toolCache.get(toolCall.name, argsHash)
-            if (cached != null) {
-                contextMemory.log("Cache hit: ${toolCall.name}")
-                toolRouter.recordExecution(toolCall.name, toolCall.input, 0, true, true)
-                continue
-            }
 
             val cachedFromMemory = toolRouter.checkMemory(toolCall.name, argsHash)
             if (cachedFromMemory != null) {
                 contextMemory.log("Memory hit: ${toolCall.name}")
+                toolRouter.recordExecution(toolCall.name, toolCall.input, 0, true, true)
+                continue
+            }
+
+            val cached = toolCache.get(toolCall.name, argsHash)
+            if (cached != null) {
+                contextMemory.log("Cache hit: ${toolCall.name}")
                 toolRouter.recordExecution(toolCall.name, toolCall.input, 0, true, true)
                 continue
             }
@@ -113,10 +141,20 @@ class ExecutionEngine(
             val execStart = System.currentTimeMillis()
             try {
                 val args = JsonParser.parseString(toolCall.input.ifBlank { "{}" })
+
+                val hookResult = checkHooks(
+                    HookEvent.BEFORE_TOOL_EXECUTION,
+                    toolName = toolCall.name,
+                )
+                if (hookResult is HookResult.Block) {
+                    errors.add("Blocked: ${hookResult.reason}")
+                    toolRouter.recordExecution(toolCall.name, toolCall.input, 0, false, false)
+                    continue
+                }
+
                 val result = toolDef.execute(args)
                 val duration = System.currentTimeMillis() - execStart
 
-                toolCache.put(toolCall.name, argsHash, result)
                 toolRouter.recordExecution(toolCall.name, toolCall.input, duration, true, false)
 
                 if (toolCall.name in listOf("editFile", "multiEditFile", "writeFile", "createFile", "renameFile")) {
@@ -128,14 +166,21 @@ class ExecutionEngine(
                 }
 
                 val review = selfReviewer.reviewToolResults(toolCall.name, toolCall.input, result, ExecutionState.Completed(toolCall.name), context)
+                val shouldCache = review.passed && review.score >= 50
+                if (shouldCache) {
+                    toolCache.put(toolCall.name, argsHash, result)
+                }
+
                 if (!review.passed || review.score < 50) {
                     contextMemory.log("Review: ${toolCall.name} score=${review.score} issues=${review.feedback.take(100)}")
+                    var latestReview = review
                     for (attempt in 0..1) {
-                        if (!selfReviewer.shouldRetry(review, attempt, 2)) break
+                        if (!selfReviewer.shouldRetry(latestReview, attempt, 2)) break
                         contextMemory.log("Retrying ${toolCall.name} (attempt ${attempt + 1})")
                         try {
                             val retryResult = toolDef.execute(args)
                             val retryReview = selfReviewer.reviewToolResults(toolCall.name, toolCall.input, retryResult, ExecutionState.Completed(toolCall.name), context)
+                            latestReview = retryReview
                             if (retryReview.passed || retryReview.score >= 50) {
                                 toolCache.put(toolCall.name, argsHash, retryResult)
                                 break
@@ -148,14 +193,26 @@ class ExecutionEngine(
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - execStart
                 toolRouter.recordExecution(toolCall.name, toolCall.input, duration, false, false)
-                errors.add("${toolCall.name}: ${e.message}")
+
+                val recoveryAction = recoveryEngine.analyzeFailure(
+                    toolName = toolCall.name,
+                    errorMessage = e.message ?: "",
+                    toolInput = toolCall.input,
+                    workspaceRoot = ideService.getPrimaryWorkspacePath(),
+                )
+                val recoveryMsg = if (recoveryAction != null) {
+                    contextMemory.log("Recovery: ${recoveryAction.message}")
+                    " (recovery: ${recoveryAction.message})"
+                } else ""
+
+                errors.add("${toolCall.name}: ${e.message}$recoveryMsg")
                 Log.w(TAG, "Tool execution failed: ${toolCall.name}", e)
             }
         }
 
         return ExecutionResult(
             taskId = task.id,
-            success = errors.size <= 2,
+            success = errors.size <= MAX_ERRORS,
             message = "Completed in ${System.currentTimeMillis() - startTime}ms",
             modifiedFiles = modifiedFiles.distinct(),
             errors = errors,
@@ -177,21 +234,17 @@ class ExecutionEngine(
     private fun extractToolCalls(response: String): List<ToolCallInfo> {
         val calls = mutableListOf<ToolCallInfo>()
 
-        // Strategy 1: Find JSON tool-call blocks using balanced-brace scanning
-        // This properly handles nested JSON objects unlike regex.
         var searchStart = 0
         while (true) {
             val toolKeyIdx = response.indexOf("\"tool\"", searchStart)
             if (toolKeyIdx == -1) break
 
-            // Find the enclosing object by scanning backwards for '{'
             val blockStart = response.lastIndexOf('{', toolKeyIdx)
             if (blockStart == -1 || blockStart < searchStart - 1) {
                 searchStart = toolKeyIdx + 1
                 continue
             }
 
-            // Find the matching closing '}' using brace-depth counting
             var depth = 0
             var blockEnd = -1
             var inString = false
@@ -228,11 +281,9 @@ class ExecutionEngine(
                 }
                 calls.add(ToolCallInfo(toolName, argsStr))
             } catch (_: Exception) {
-                // Not valid JSON; continue searching
             }
         }
 
-        // Strategy 2: XML-like format (legacy)
         if (calls.isEmpty()) {
             val xmlRegex = Regex("""<(\w+_call)>\s*<tool_name>\s*(\w+)\s*</tool_name>\s*<parameters>\s*(\{.*?\})?\s*</parameters>\s*</\1>""", RegexOption.DOT_MATCHES_ALL)
             for (match in xmlRegex.findAll(response)) {
@@ -240,9 +291,7 @@ class ExecutionEngine(
             }
         }
 
-        // Strategy 3: Prose format "use|call|invoke toolName with args: {...}"
         if (calls.isEmpty()) {
-            // Find balanced JSON objects after "with args:"
             val prosePrefixRegex = Regex("""(?:use|call|invoke)\s+(\w+)\s*(?:with\s+args?\s*:)?""", RegexOption.IGNORE_CASE)
             for (match in prosePrefixRegex.findAll(response)) {
                 val toolName = match.groupValues[1]
