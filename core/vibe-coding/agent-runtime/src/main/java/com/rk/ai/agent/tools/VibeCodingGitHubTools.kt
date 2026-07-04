@@ -63,7 +63,7 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
     }
 
     private val githubRepoInfo = Tool(
-        name = "github_repo_info",
+        name = "githubRepoInfo",
         description = "Get GitHub repo metadata: stars, forks, description, language, license, topics. " +
             "Use to check a project's popularity, tech stack, or license before using it. " +
             "Example: {\"repo\": \"anomalyco/opencode\"}",
@@ -104,7 +104,7 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
     )
 
     private val githubReadme = Tool(
-        name = "github_readme",
+        name = "githubReadme",
         description = "Fetch the README of a GitHub repo (raw markdown content). " +
             "Use to understand a project's purpose, installation, and usage. " +
             "Example: {\"repo\": \"anomalyco/opencode\"}",
@@ -133,7 +133,7 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
     )
 
     private val githubFileFetch = Tool(
-        name = "github_file_fetch",
+        name = "githubFileFetch",
         description = "Fetch a specific file from a GitHub repo by path. Optionally specify a branch. " +
             "Use to read source files from GitHub without cloning the repo. " +
             "Example: {\"repo\": \"anomalyco/opencode\", \"path\": \"README.md\"} " +
@@ -171,7 +171,7 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
     )
 
     private val githubSearchCode = Tool(
-        name = "github_search_code",
+        name = "githubSearchCode",
         description = "Search code on GitHub using the search API. Optionally scope to a repo. " +
             "Use to find how projects implement specific patterns or use APIs. " +
             "Example: {\"query\": \"suspend function\", \"limit\": 5} " +

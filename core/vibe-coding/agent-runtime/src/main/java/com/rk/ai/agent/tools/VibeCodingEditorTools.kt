@@ -68,10 +68,14 @@ class VibeCodingEditorTools(private val ideService: IdeService) {
             )
         },
         execute = { args ->
-            val filePath = args.asJsonObject["filePath"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath'."))
-            ideService.openFile(File(filePath))
-            listOf(UIMessagePart.Text("OK Opened $filePath"))
+            val obj = args.asJsonObject
+            val filePath = obj["filePath"]?.asJsonPrimitive?.asString
+                ?: obj["path"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath' or 'path'."))
+            val resolved = ideService.resolvePath(filePath)
+            if (resolved == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $filePath\nSUGGESTION: Check the path with getProjectStructure."))
+            ideService.openFile(resolved)
+            listOf(UIMessagePart.Text("OK Opened ${resolved.absolutePath}"))
         },
     )
 
@@ -154,8 +158,10 @@ class VibeCodingEditorTools(private val ideService: IdeService) {
             )
         },
         execute = { args ->
-            val filePath = args.asJsonObject["filePath"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath'."))
+            val obj = args.asJsonObject
+            val filePath = obj["filePath"]?.asJsonPrimitive?.asString
+                ?: obj["path"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath' or 'path'."))
             ideService.refreshEditors(filePath, false)
             listOf(UIMessagePart.Text("OK Refreshed $filePath"))
         },

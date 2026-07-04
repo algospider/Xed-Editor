@@ -133,7 +133,7 @@ class RecoveryEngine {
             "runCommand", "getFileContent",
         )
 
-        val ALWAYS_RETRY = setOf("runCommand", "web_fetch", "web_search")
+        val ALWAYS_RETRY = setOf("runCommand", "webFetch", "webSearch")
 
         fun isRetryable(toolName: String, errorMessage: String): Boolean {
             if (toolName in ALWAYS_RETRY) return true

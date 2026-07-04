@@ -17,9 +17,10 @@ class VibeCodingDiffTools(private val ideService: IdeService) {
 
     private val openDiff = Tool(
         name = "openDiff",
-        description = "Open a side-by-side diff view for user review. " +
-            "Use BEFORE writeFile/editFile for high-risk changes to get user confirmation. " +
-            "Shows old vs new content for the user to approve/reject. " +
+        description = "Open a side-by-side diff for user review. User approves/rejects in the UI. " +
+            "After approval, call getDiffResult to read the post-approval result. " +
+            "Use for high-risk changes where you want user confirmation before writing. " +
+            "Workflow: openDiff → user approves in UI → getDiffResult (reads approved file). " +
             "Example: {\"filePath\": \"src/main.kt\", \"newContent\": \"updated file content...\"}",
         parameters = {
             InputSchema.Obj(
@@ -46,8 +47,9 @@ class VibeCodingDiffTools(private val ideService: IdeService) {
 
     private val getDiffResult = Tool(
         name = "getDiffResult",
-        description = "Get file content AFTER user reviewed a diff. " +
-            "Use after openDiff to check what the user approved. " +
+        description = "Read file content AFTER user reviewed an openDiff. " +
+            "Step 3 in the workflow: openDiff → user approves in UI → getDiffResult. " +
+            "Returns current file content (user-approved version if they accepted). " +
             "Example: {\"filePath\": \"src/main.kt\"}",
         parameters = {
             InputSchema.Obj(
@@ -67,8 +69,9 @@ class VibeCodingDiffTools(private val ideService: IdeService) {
 
     private val rejectDiff = Tool(
         name = "rejectDiff",
-        description = "Reject/close a pending diff view for a file. " +
-            "Use when the user doesn't want to apply the proposed changes. " +
+        description = "Reject/close a pending diff view. " +
+            "Use when the user declined the proposed changes in the UI. " +
+            "File content is NOT modified — reverts to original. " +
             "Example: {\"filePath\": \"src/main.kt\"}",
         parameters = {
             InputSchema.Obj(

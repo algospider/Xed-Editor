@@ -27,6 +27,23 @@ class VibeCodingFileTools(
             return obj["path"]?.asJsonPrimitive?.asString
                 ?: obj["filePath"]?.asJsonPrimitive?.asString
                 ?: obj["file"]?.asJsonPrimitive?.asString
+                ?: obj["sourcePath"]?.asJsonPrimitive?.asString
+                ?: obj["destPath"]?.asJsonPrimitive?.asString
+                ?: obj["outputPath"]?.asJsonPrimitive?.asString
+                ?: obj["target"]?.asJsonPrimitive?.asString
+        }
+
+        private fun pathNotFoundError(rawPath: String, workspacePath: String?): String {
+            val ws = workspacePath?.takeIf { it.isNotBlank() } ?: "none"
+            return "ERROR: Path could not be resolved: '$rawPath'\n" +
+                "Workspace: $ws\n" +
+                "SUGGESTION: Use an absolute path or a path relative to workspace root. " +
+                "Call getProjectStructure or listFiles to verify the path exists."
+        }
+
+        private fun buildWorkspaceMsg(ideService: IdeService): String {
+            val ws = ideService.getPrimaryWorkspacePath()
+            return ws.takeIf { it.isNotBlank() }?.let { "Workspace: $it" } ?: "No workspace configured"
         }
 
         fun parseFilePaths(element: com.google.gson.JsonElement?): List<String> {
@@ -83,12 +100,12 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val rawPath = obj["path"]?.asJsonPrimitive?.asString
+            val rawPath = extractPath(obj)
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'path' argument.\nSUGGESTION: Provide an absolute or workspace-relative path, e.g. {\"path\": \"src/main.kt\"}"))
             val startLine = obj["startLine"]?.asJsonPrimitive?.asInt
             val endLine = obj["endLine"]?.asJsonPrimitive?.asInt
             val resolved = ideService.resolvePath(rawPath)
-            if (resolved == null) return@Tool listOf(UIMessagePart.Text("ERROR: Could not resolve path '$rawPath'.\nSUGGESTION: Use getProjectStructure or listFiles to verify the path exists. Try an absolute path or check if the file is inside the workspace."))
+            if (resolved == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(rawPath, ideService.getPrimaryWorkspacePath())))
             val filePath = resolved.absolutePath
 
             if (startLine == null && endLine == null) {
@@ -108,13 +125,17 @@ class VibeCodingFileTools(
 
     private val readFiles = Tool(
         name = "readFiles",
-        description = "Read MULTIPLE files in one call (batch mode). Pass comma-separated paths or a JSON array. " +
+        description = "Read MULTIPLE files in one call (batch mode). Pass a JSON array of paths. " +
             "Use INSTEAD of repeated readFile calls to minimize round-trips. " +
-            "Example: {\"filePaths\": [\"src/a.kt\", \"src/b.kt\"]} or {\"filePaths\": \"src/a.kt, src/b.kt\"}",
+            "Example: {\"filePaths\": [\"src/a.kt\", \"src/b.kt\"]}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    putJsonObject("filePaths") { put("type", "string"); put("description", "Comma-separated list of paths (e.g. \"a.kt, b.kt, c.kt\") or JSON array of path strings") }
+                    putJsonObject("filePaths") {
+                        put("type", "array")
+                        put("description", "Array of file path strings to read (e.g. [\"src/a.kt\", \"src/b.kt\"])")
+                        putJsonObject("items") { put("type", "string") }
+                    }
                 },
                 required = listOf("filePaths"),
             )
@@ -154,12 +175,12 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val path = obj["filePath"]?.asJsonPrimitive?.asString ?: obj["path"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath' argument.\nEXPECTED: {\"filePath\": \"src/main.kt\", \"content\": \"...\"}"))
+            val path = extractPath(obj)
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath' or 'path' argument.\nEXPECTED: {\"filePath\": \"src/main.kt\", \"content\": \"...\"}"))
             val content = obj["content"]?.asJsonPrimitive?.asString
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'content' argument.\nEXPECTED: {\"filePath\": \"src/main.kt\", \"content\": \"...\"}"))
             val file = ideService.resolvePath(path)
-            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $path\nSUGGESTION: Use an absolute path or a workspace-relative path."))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(path, ideService.getPrimaryWorkspacePath())))
             try {
                 file.parentFile?.mkdirs()
                 ideService.writeFile(file, content)
@@ -194,15 +215,15 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = obj["filePath"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'filePath'."))
+            val filePath = extractPath(obj)
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'filePath' or 'path'."))
             val oldString = obj["oldString"]?.asJsonPrimitive?.asString
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'oldString'."))
             val newString = obj["newString"]?.asJsonPrimitive?.asString
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'newString'."))
             val replaceAll = obj["replaceAll"]?.asJsonPrimitive?.asBoolean ?: false
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $filePath\nSUGGESTION: Try an absolute path."))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
             val resolvedPath = file.absolutePath
 
             val content = ideService.getFileContent(resolvedPath, null, null)
@@ -252,13 +273,13 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath"))
+            val filePath = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath or path"))
             val oldString = obj["oldString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing oldString"))
             val newString = obj["newString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing newString"))
             val replaceAll = obj["replaceAll"]?.asJsonPrimitive?.asBoolean ?: false
 
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $filePath"))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
             val resolvedPath = file.absolutePath
 
             val cached = fileContentCache.get(resolvedPath)
@@ -309,10 +330,10 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = obj["filePath"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath"))
+            val filePath = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath or path"))
             val editsArr = obj["edits"]?.asJsonArray ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing edits array"))
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $filePath"))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
             var content = ideService.getFileContent(file.absolutePath, null, null)
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: File not found: ${file.absolutePath}"))
             var successCount = 0
@@ -389,11 +410,11 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = obj["filePath"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'filePath'."))
+            val filePath = extractPath(obj)
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'filePath' or 'path'."))
             val content = obj["content"]?.asJsonPrimitive?.asString ?: ""
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Could not resolve path: $filePath"))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
             if (file.exists()) return@Tool listOf(UIMessagePart.Text("ERROR: File already exists: $filePath\nSUGGESTION: Use writeFile to overwrite, or choose a different path."))
             try {
                 file.parentFile?.mkdirs()
@@ -420,8 +441,9 @@ class VibeCodingFileTools(
             )
         },
         execute = { args ->
-            val filePath = args.asJsonObject["filePath"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath'."))
+            val obj = args.asJsonObject
+            val filePath = extractPath(obj)
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath' or 'path'."))
             val file = ideService.resolvePath(filePath)
             if (file == null || !file.exists()) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: $filePath\nSUGGESTION: Verify the path with listFiles."))
             try {

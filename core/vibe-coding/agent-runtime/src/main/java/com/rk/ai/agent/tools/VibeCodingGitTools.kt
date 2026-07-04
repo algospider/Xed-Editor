@@ -17,6 +17,12 @@ class VibeCodingGitTools(private val ideService: IdeService) {
     private fun com.google.gson.JsonElement.workspaceOrPrimary(): String =
         asJsonObject["workspacePath"]?.asJsonPrimitive?.asString ?: ideService.getPrimaryWorkspacePath()
 
+    private fun requireWorkspace(msg: UIMessagePart.Text? = null): String? {
+        val ws = ideService.getPrimaryWorkspacePath()
+        if (ws.isBlank()) return null
+        return ws
+    }
+
     private val getGitStatus = Tool(
         name = "getGitStatus",
         description = "Returns git status: staged, modified, untracked files, and current branch. " +
@@ -31,8 +37,9 @@ class VibeCodingGitTools(private val ideService: IdeService) {
             )
         },
         execute = { args ->
+            val workspace = args.workspaceOrPrimary()
+            if (workspace.isBlank()) return@Tool listOf(UIMessagePart.Text("ERROR: No workspace configured. Open a project or provide a workspacePath."))
             try {
-                val workspace = args.workspaceOrPrimary()
                 val status = ideService.getGitStatus(workspace)
                 val text = buildString {
                     status.keySet().forEach { key ->
@@ -49,7 +56,9 @@ class VibeCodingGitTools(private val ideService: IdeService) {
                 }
                 listOf(UIMessagePart.Text(text.ifEmpty { "Working tree clean" }))
             } catch (e: Exception) {
-                listOf(UIMessagePart.Text("ERROR: ${e.message}\nSUGGESTION: Is this a git repository? Run 'git init' first if not."))
+                val ws = ideService.getPrimaryWorkspacePath()
+                val msg = "Workspace: $ws. ${e.message ?: ""}"
+                listOf(UIMessagePart.Text("ERROR: $msg\nSUGGESTION: Is this a git repository? Run 'git init' first if not."))
             }
         },
     )
@@ -261,8 +270,38 @@ class VibeCodingGitTools(private val ideService: IdeService) {
         },
     )
 
+    private val gitPull = Tool(
+        name = "gitPull",
+        description = "Pull latest changes from remote. Fetches and merges the remote branch. " +
+            "Use to sync with upstream before making changes. " +
+            "Example: {\"remote\": \"origin\", \"branch\": \"main\"}",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    putJsonObject("remote") { put("type", "string"); put("description", "Remote name (default: origin)") }
+                    putJsonObject("branch") { put("type", "string"); put("description", "Branch to pull (default: current branch)") }
+                    putJsonObject("workspacePath") { put("type", "string"); put("description", "Path to the git repository (optional)") }
+                },
+                required = emptyList<String>(),
+            )
+        },
+        execute = { args ->
+            val obj = args.asJsonObject
+            val remote = obj["remote"]?.asJsonPrimitive?.asString ?: "origin"
+            val branch = obj["branch"]?.asJsonPrimitive?.asString
+            val workspace = args.workspaceOrPrimary()
+            val branchFlag = if (branch != null) branch else ""
+            val result = ideService.runCommand("git pull $remote $branchFlag".trimEnd(), 30)
+            listOf(UIMessagePart.Text(buildString {
+                if (result.output.isNotBlank()) appendLine("STDOUT:\n${result.output}")
+                if (result.error.isNotBlank()) appendLine("STDERR:\n${result.error}")
+                append("Exit: ${result.exitCode}${if (result.timedOut) " (TIMED OUT)" else ""}")
+            }.trimEnd()))
+        },
+    )
+
     val all: List<Tool> = listOf(
-        getGitStatus, getGitDiff, gitCommit, gitCheckout,
+        getGitStatus, getGitDiff, gitCommit, gitCheckout, gitPull,
         gitLog, gitBranch, gitPush, createPullRequest,
     )
 }

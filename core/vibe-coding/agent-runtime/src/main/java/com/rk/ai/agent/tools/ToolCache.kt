@@ -33,13 +33,16 @@ class ToolCache(
     fun get(toolName: String, argsHash: String): List<UIMessagePart>? {
         if (!isCacheable(toolName)) return null
         val key = makeKey(toolName, argsHash)
-        val entry = cache[key] ?: return null
+        val entry = cache[key]
+        if (entry == null) { recordLookup(false); return null }
         if (System.currentTimeMillis() - entry.timestamp > ttlMs) {
             cache.remove(key)
             synchronized(accessOrder) { accessOrder.remove(key) }
+            recordLookup(false)
             return null
         }
         entry.hitCount++
+        recordLookup(true)
         synchronized(accessOrder) {
             accessOrder.remove(key)
             accessOrder.add(key)
@@ -85,16 +88,24 @@ class ToolCache(
         }
     }
 
+    private var totalLookups = 0L
+    private var totalHits = 0L
+
+    fun recordLookup(isHit: Boolean) {
+        totalLookups++
+        if (isHit) totalHits++
+    }
+
     val stats: String get() = buildString {
         appendLine("Tool Cache: ${cache.size}/$maxEntries entries, TTL: ${ttlMs/1000}s")
         if (cache.isEmpty()) {
             appendLine("(empty)")
             return@buildString
         }
-        val totalHits = cache.values.sumOf { it.hitCount }
-        appendLine("Total hits: $totalHits")
+        val hitCount = cache.values.sumOf { it.hitCount }
+        val ratio = if (totalLookups > 0) "%.1f%%".format(100.0 * totalHits / totalLookups) else "N/A"
+        appendLine("Hits: $totalHits / Misses: ${totalLookups - totalHits} (ratio: $ratio)")
         val sorted = cache.entries.sortedByDescending { it.value.hitCount }
-        val hitRatio = if (totalHits > 0) "100%" else "0%"
         appendLine("Most-used entries:")
         sorted.take(5).forEach { (key, entry) ->
             val ageSec = (System.currentTimeMillis() - entry.timestamp) / 1000

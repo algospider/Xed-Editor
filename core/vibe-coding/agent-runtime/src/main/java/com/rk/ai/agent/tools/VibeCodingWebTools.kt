@@ -26,7 +26,7 @@ import java.nio.charset.Charset
 class VibeCodingWebTools(private val ideService: IdeService) {
 
     private val webFetch = Tool(
-        name = "web_fetch",
+        name = "webFetch",
         description = "Fetches and extracts readable content from a URL. " +
             "Supports text, HTML, JSON, XML, and markdown output. " +
             "Use for reading documentation, API responses, or web pages. " +
@@ -70,7 +70,7 @@ class VibeCodingWebTools(private val ideService: IdeService) {
     )
 
     private val webSearch = Tool(
-        name = "web_search",
+        name = "webSearch",
         description = "Searches the web via DuckDuckGo HTML and returns titles, URLs, and snippets. " +
             "Use for quick lookup of docs, tutorials, or current info. " +
             "For deep research on a topic, use web_research instead. " +
@@ -97,7 +97,7 @@ class VibeCodingWebTools(private val ideService: IdeService) {
     )
 
     private val webDownload = Tool(
-        name = "web_download",
+        name = "webDownload",
         description = "Downloads a URL to a workspace file. Preserves binary content. " +
             "Use for downloading images, binaries, archives, or any non-text files. " +
             "For text content you want to read, use web_fetch instead. " +
@@ -141,7 +141,7 @@ class VibeCodingWebTools(private val ideService: IdeService) {
     )
 
     private val webResearch = Tool(
-        name = "web_research",
+        name = "webResearch",
         description = "Searches the web AND fetches top result pages for deep research. " +
             "Returns search results plus readable excerpts from each page. " +
             "Use for comprehensive research — combines search + fetch in one call. " +

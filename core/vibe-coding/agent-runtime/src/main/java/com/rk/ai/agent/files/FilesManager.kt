@@ -29,10 +29,11 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
 class FilesManager(
-    private val context: Context,
+    context: Context,
     private val repository: FilesRepository,
     private val appScope: AppScope,
 ) {
+    private val appContext: Context = context.applicationContext
     companion object {
         private const val TAG = "FilesManager"
     }
@@ -46,7 +47,7 @@ class FilesManager(
         val resolvedName = displayName ?: getFileNameFromUri(uri) ?: "file"
         val resolvedMime = mimeType ?: getFileMimeType(uri) ?: "application/octet-stream"
         val target = createTargetFile(folder, resolvedName, resolvedMime)
-        context.contentResolver.openInputStream(uri)?.use { input ->
+        appContext.contentResolver.openInputStream(uri)?.use { input ->
             target.outputStream().use { output ->
                 input.copyTo(output)
             }
@@ -102,11 +103,11 @@ class FilesManager(
     suspend fun getByRelativePath(relativePath: String): ManagedFileEntity? = repository.getByPath(relativePath)
 
     fun getFile(entity: ManagedFileEntity): File =
-        File(context.filesDir, entity.relativePath)
+        File(appContext.filesDir, entity.relativePath)
 
     fun createChatFilesByContents(uris: List<Uri>): List<Uri> {
         val newUris = mutableListOf<Uri>()
-        val dir = context.filesDir.resolve(FileFolders.UPLOAD)
+        val dir = appContext.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
             dir.mkdirs()
         }
@@ -119,7 +120,7 @@ class FilesManager(
                 if (!file.exists()) {
                     file.createNewFile()
                 }
-                val inputStream = context.contentResolver.openInputStream(uri)
+                val inputStream = appContext.contentResolver.openInputStream(uri)
                     ?: error("Failed to open input stream for $uri")
                 inputStream.use { input ->
                     file.outputStream().use { output ->
@@ -148,7 +149,7 @@ class FilesManager(
 
     fun createChatFilesByByteArrays(byteArrays: List<ByteArray>): List<Uri> {
         val newUris = mutableListOf<Uri>()
-        val dir = context.filesDir.resolve(FileFolders.UPLOAD)
+        val dir = appContext.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
             dir.mkdirs()
         }
@@ -222,7 +223,7 @@ class FilesManager(
     }
 
     suspend fun countChatFiles(): Pair<Int, Long> = withContext(Dispatchers.IO) {
-        val dir = context.filesDir.resolve(FileFolders.UPLOAD)
+        val dir = appContext.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
             return@withContext Pair(0, 0)
         }
@@ -233,7 +234,7 @@ class FilesManager(
     }
 
     fun createChatTextFile(text: String): UIMessagePart.Document {
-        val dir = context.filesDir.resolve(FileFolders.UPLOAD)
+        val dir = appContext.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
             dir.mkdirs()
         }
@@ -254,7 +255,7 @@ class FilesManager(
     }
 
     fun getImagesDir(): File {
-        val dir = context.filesDir.resolve("images")
+        val dir = appContext.filesDir.resolve("images")
         if (!dir.exists()) {
             dir.mkdirs()
         }
@@ -326,7 +327,7 @@ class FilesManager(
     }
 
     suspend fun syncFolder(folder: String = FileFolders.UPLOAD): Int = withContext(Dispatchers.IO) {
-        val dir = File(context.filesDir, folder)
+        val dir = File(appContext.filesDir, folder)
         if (!dir.exists()) return@withContext 0
         val files = dir.listFiles()?.filter { it.isFile } ?: return@withContext 0
         var inserted = 0
@@ -363,7 +364,7 @@ class FilesManager(
     }
 
     private fun createTargetFile(folder: String, displayName: String, mimeType: String?): File {
-        val dir = File(context.filesDir, folder)
+        val dir = File(appContext.filesDir, folder)
         if (!dir.exists()) {
             dir.mkdirs()
         }
@@ -427,13 +428,13 @@ class FilesManager(
         FileUtils.buildRelativePath(folder, file)
 
     private fun getRelativePathInFilesDir(file: File): String? =
-        FileUtils.getRelativePathInFilesDir(context.filesDir, file)
+        FileUtils.getRelativePathInFilesDir(appContext.filesDir, file)
 
     fun getFileNameFromUri(uri: Uri): String? =
-        FileUtils.getFileNameFromUri(context, uri)
+        FileUtils.getFileNameFromUri(appContext, uri)
 
     fun getFileMimeType(uri: Uri): String? =
-        FileUtils.getFileMimeType(context, uri)
+        FileUtils.getFileMimeType(appContext, uri)
 
     private fun guessMimeType(file: File, fileName: String): String =
         FileUtils.guessMimeType(file, fileName)
