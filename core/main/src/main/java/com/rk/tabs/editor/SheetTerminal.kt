@@ -31,11 +31,17 @@ import com.termux.view.TerminalViewClient
 import java.lang.ref.WeakReference
 
 class SheetTerminalClient(
-    private val view: TerminalView,
+    view: TerminalView,
     private val virtualKeysViewRef: () -> VirtualKeysView?,
 ) : TerminalViewClient, TerminalSessionClient {
 
-    override fun onTextChanged(changedSession: TerminalSession) { view.onScreenUpdated() }
+    @Volatile
+    var view: TerminalView? = view
+        private set
+
+    fun clearView() { view = null }
+
+    override fun onTextChanged(changedSession: TerminalSession) { view?.onScreenUpdated() }
     override fun onTitleChanged(changedSession: TerminalSession) {}
     override fun onSessionFinished(finishedSession: TerminalSession) {}
     override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
@@ -43,8 +49,8 @@ class SheetTerminalClient(
     }
     override fun onPasteTextFromClipboard(session: TerminalSession?) {
         val clip = ClipboardUtils.getText().toString()
-        if (clip.trim { it <= ' ' }.isNotEmpty() && view.mEmulator != null) {
-            view.mEmulator.paste(clip)
+        if (clip.trim { it <= ' ' }.isNotEmpty() && view?.mEmulator != null) {
+            view?.mEmulator?.paste(clip)
         }
     }
     override fun onBell(session: TerminalSession) {}
@@ -67,16 +73,16 @@ class SheetTerminalClient(
     override fun logStackTrace(tag: String?, e: Exception?) { e?.printStackTrace() }
     override fun onScale(scale: Float): Float {
         val fontScale = scale.coerceIn(11f, 45f)
-        view.setTextSize(fontScale.toInt())
+        view?.setTextSize(fontScale.toInt())
         return fontScale
     }
     override fun onSingleTapUp(e: MotionEvent) {
-        view.post {
-            view.isFocusable = true
-            view.isFocusableInTouchMode = true
-            view.requestFocus()
-            val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            imm?.restartInput(view); imm?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+        view?.post {
+            isFocusable = true
+            isFocusableInTouchMode = true
+            requestFocus()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.restartInput(this); imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
         }
     }
     override fun shouldBackButtonBeMappedToEscape(): Boolean = false
@@ -92,7 +98,7 @@ class SheetTerminalClient(
     override fun readShiftKey(): Boolean = virtualKeysViewRef()?.readSpecialButton(SpecialButton.SHIFT, true) ?: false
     override fun readFnKey(): Boolean = virtualKeysViewRef()?.readSpecialButton(SpecialButton.FN, true) ?: false
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
-    override fun onEmulatorSet() { view.setTerminalCursorBlinkerState(true, true) }
+    override fun onEmulatorSet() { view?.setTerminalCursorBlinkerState(true, true) }
 }
 
 @Composable
@@ -122,6 +128,13 @@ fun SheetTerminal(
     var virtualKeysViewRef by remember { mutableStateOf<WeakReference<VirtualKeysView>>(WeakReference(null)) }
     var terminalClient by remember { mutableStateOf<SheetTerminalClient?>(null) }
     var lastBoundSession by remember { mutableStateOf<TerminalSession?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            terminalClient?.clearView()
+            session?.updateTerminalSessionClient(null)
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         AndroidView<TerminalView>(
