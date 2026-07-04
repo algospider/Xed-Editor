@@ -24,27 +24,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 
-/**
- * Standardized bottom sheet for Xed-Editor.
- *
- * Provides consistent shape, colors, drag handle, and optional header
- * with title, subtitle, and close button.
- *
- * Usage:
- * ```kotlin
- * XedBottomSheet(onDismissRequest = { show = false }) {
- *     // content
- * }
- *
- * XedBottomSheet(
- *     onDismissRequest = { show = false },
- *     title = { Text("Title") },
- * ) {
- *     // content
- * }
- * ```
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun XedBottomSheet(
@@ -76,7 +57,8 @@ fun XedBottomSheet(
             null
         },
     ) {
-        // ── Header section (title + subtitle + actions + close) ──
+        val columnScope = this
+
         val hasHeader = title != null || subtitle != null || headerContent != null || extraHeaderActions != null || showCloseButton
         if (hasHeader) {
             Row(
@@ -128,13 +110,12 @@ fun XedBottomSheet(
             )
         }
 
-        // ── Main content area ──
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding(),
         ) {
-            content()
+            with(columnScope) { content() }
         }
     }
 }
