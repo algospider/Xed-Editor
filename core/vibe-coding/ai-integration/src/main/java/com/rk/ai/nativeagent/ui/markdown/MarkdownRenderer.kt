@@ -19,7 +19,7 @@ fun MarkdownContent(
     }
 
     Column(modifier = modifier) {
-        Markdown(content = text)
+        Markdown(content = text, retainState = true)
         Spacer(Modifier.height(6.dp))
     }
 }
