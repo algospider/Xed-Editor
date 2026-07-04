@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.model.rememberMarkdownState
 
 @Composable
 fun MarkdownContent(
@@ -18,8 +19,9 @@ fun MarkdownContent(
         return
     }
 
+    val markdownState = rememberMarkdownState(text, retainState = true)
     Column(modifier = modifier) {
-        Markdown(content = text, retainState = true)
+        Markdown(markdownState = markdownState)
         Spacer(Modifier.height(6.dp))
     }
 }
