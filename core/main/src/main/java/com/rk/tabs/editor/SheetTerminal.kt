@@ -77,12 +77,13 @@ class SheetTerminalClient(
         return fontScale
     }
     override fun onSingleTapUp(e: MotionEvent) {
-        view?.post {
-            isFocusable = true
-            isFocusableInTouchMode = true
-            requestFocus()
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            imm?.restartInput(this); imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+        val v = view ?: return
+        v.post {
+            v.isFocusable = true
+            v.isFocusableInTouchMode = true
+            v.requestFocus()
+            val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.restartInput(v); imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
         }
     }
     override fun shouldBackButtonBeMappedToEscape(): Boolean = false
