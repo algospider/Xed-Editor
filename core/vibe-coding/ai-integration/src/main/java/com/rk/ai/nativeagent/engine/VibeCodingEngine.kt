@@ -1168,6 +1168,26 @@ class VibeCodingEngine(
         }
     }
 
+    fun deleteConversation(conversationId: Uuid) {
+        engineScope.launch(Dispatchers.IO) {
+            try {
+                conversationRepo.getConversationById(conversationId)?.let { conv ->
+                    conversationRepo.deleteConversation(conv)
+                }
+                if (_state.value.currentConversationId == conversationId) {
+                    _state.value = VibeCodingState(
+                        commandCatalog = storedCommandCatalog.toList(),
+                        permissionAutoRespondRules = permissionManager.rules,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    error = "Failed to delete conversation: ${e.message}",
+                )
+            }
+        }
+    }
+
     private suspend fun saveConversation() {
         try {
             val messages = _state.value.messages

@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +28,7 @@ fun VibeCodingConversationSidebar(
     currentConversationId: Uuid?,
     assistantId: Uuid,
     onSelectConversation: (Conversation) -> Unit,
+    onDeleteConversation: (Conversation) -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -118,9 +120,13 @@ fun VibeCodingConversationSidebar(
                             colorScheme.surface
                         },
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
+                        Row(
+                            modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Text(
                                 text = conv.title.ifBlank { "Untitled" },
+                                modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 ),
@@ -128,6 +134,17 @@ fun VibeCodingConversationSidebar(
                                 overflow = TextOverflow.Ellipsis,
                                 color = if (isSelected) colorScheme.primary else colorScheme.onSurface,
                             )
+                            IconButton(
+                                onClick = { onDeleteConversation(conv) },
+                                modifier = Modifier.size(24.dp),
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Delete,
+                                    contentDescription = "Delete conversation",
+                                    tint = colorScheme.error.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
                         }
                     }
                 }

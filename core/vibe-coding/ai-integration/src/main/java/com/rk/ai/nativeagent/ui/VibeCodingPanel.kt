@@ -56,6 +56,8 @@ fun VibeCodingPanel(
     var activePanel by remember { mutableStateOf(ToolPanel.NONE) }
     var showUndoSnackbar by remember { mutableStateOf(false) }
     var sessionToRename by remember { mutableStateOf<kotlin.uuid.Uuid?>(null) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var conversationToDelete by remember { mutableStateOf<com.rk.ai.models.Conversation?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -404,6 +406,10 @@ fun VibeCodingPanel(
                     engine.loadConversation(conversation)
                     showHistory = false
                 },
+                onDeleteConversation = { conv ->
+                    conversationToDelete = conv
+                    showDeleteConfirmDialog = true
+                },
                 onDismiss = { showHistory = false },
                 modifier = Modifier.width(260.dp).fillMaxHeight(),
             )
@@ -455,6 +461,33 @@ fun VibeCodingPanel(
         ClearConversationDialog(
             onClear = { engine.clearConversation() },
             onDismiss = { showClearDialog = false },
+        )
+    }
+
+    if (showDeleteConfirmDialog && conversationToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("Delete Conversation") },
+            text = {
+                val title = conversationToDelete!!.title.ifBlank { "Untitled" }
+                Text("Delete conversation \"$title\"? This cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        engine.deleteConversation(conversationToDelete!!.id)
+                        showDeleteConfirmDialog = false
+                        conversationToDelete = null
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            },
         )
     }
 

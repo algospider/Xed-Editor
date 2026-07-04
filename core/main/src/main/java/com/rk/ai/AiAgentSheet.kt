@@ -22,11 +22,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rk.activities.main.BottomPanelMode
 import com.rk.activities.main.MainActivity
 import com.rk.activities.main.MainViewModel
 import com.rk.activities.main.gitViewModel
+import com.rk.ai.nativeagent.VibeCodingProvider
 import com.rk.ai.nativeagent.engine.VibeCodingEngine
 import com.rk.file.FileWrapper
 import com.rk.file.sandboxHomeDir
@@ -148,22 +150,34 @@ fun UnifiedToolSheet(
         }
     }
 
-    val vibecodingEngine = remember(activity) {
-        activity?.let { act ->
+    val vibecodingEngine = remember {
+        var eng = VibeCodingProvider.engineRef.get()
+        if (eng == null) {
+            eng = activity?.let { act ->
+                AiProvider.ideBridge?.setWorkspacePath(cwd.value)
+                val factory = AiProvider.ideServiceFactory ?: return@let null
+                VibeCodingEngine(context = act.applicationContext, ideService = factory.create(viewModel))
+            }
+            VibeCodingProvider.engineRef.set(eng)
+        } else {
             AiProvider.ideBridge?.setWorkspacePath(cwd.value)
-            val factory = AiProvider.ideServiceFactory ?: return@let null
-            VibeCodingEngine(context = act, ideService = factory.create(viewModel))
         }
+        eng
     }
 
     LaunchedEffect(cwd.value) {
         AiProvider.ideBridge?.setWorkspacePath(cwd.value)
     }
 
-    DisposableEffect(activity) {
-        onDispose {
-            vibecodingEngine?.dispose()
+    val act = activity
+    DisposableEffect(act) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_DESTROY && act?.isChangingConfigurations != true) {
+                VibeCodingProvider.engineRef.getAndSet(null)?.dispose()
+            }
         }
+        act?.lifecycle?.addObserver(observer)
+        onDispose { act?.lifecycle?.removeObserver(observer) }
     }
 
     // Engine lifecycle managed via remember + DisposableEffect above

@@ -133,7 +133,6 @@ fun SheetTerminal(
     DisposableEffect(Unit) {
         onDispose {
             terminalClient?.clearView()
-            session?.updateTerminalSessionClient(null)
         }
     }
 
