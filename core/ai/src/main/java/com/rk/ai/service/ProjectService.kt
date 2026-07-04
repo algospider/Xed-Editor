@@ -58,7 +58,7 @@ class ProjectService(private val tabRepo: TabRepository, private val viewModel: 
         }
 
         val filtered = if (resolvedPath?.isFile == true) {
-            results.filter { it.file.absolutePath == resolvedPath.absolutePath }
+            results.filter { it.file.getAbsolutePath() == resolvedPath.absolutePath }
         } else results
 
         return JsonArray().apply {
@@ -96,7 +96,7 @@ class ProjectService(private val tabRepo: TabRepository, private val viewModel: 
         }
 
         val scoped = if (resolvedPath?.isFile == true) {
-            results.filter { it.file.absolutePath == resolvedPath.absolutePath }
+            results.filter { it.file.getAbsolutePath() == resolvedPath.absolutePath }
         } else results
 
         val filtered = scoped.filter { item ->
