@@ -1,5 +1,7 @@
 package com.rk.ai.agent.hooks
 
+import kotlin.text.Regex
+
 data class SecurityPattern(
     val pattern: Regex,
     val severity: SecuritySeverity,
@@ -9,7 +11,7 @@ data class SecurityPattern(
 
 enum class SecuritySeverity { LOW, MEDIUM, HIGH, CRITICAL }
 
-typealias SecurityAlertCallback = (severity: String, message: String, toolName: String?, filePath: String?) -> Unit
+typealias SecurityAlertCallback = (String, String, String?, String?) -> Unit
 
 class SecurityHook(
     private val onAlert: SecurityAlertCallback? = null,

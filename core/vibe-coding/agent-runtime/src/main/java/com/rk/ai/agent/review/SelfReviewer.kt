@@ -151,17 +151,23 @@ class SelfReviewer {
                 }
             }
 
-            // Quality patterns — using regex to avoid false positives
-            val qualityPatterns = listOf(
-                Regex("""(?i)\b " left code Regex""(?i)\bFIXME\bIXME needs",
- Regex("(?)\ACKb""") to "HACK in code - likely needs",
- Regex""bXXX""StackTrace",
-                Regex("""System\.out\.""") to "System logging\.StackTrace""") to "printStackTrace in",
-\s*\(\Exception"" "("satching Regex toNull assertion () may cause NPE",
-                Regex("<])ass+""") to "Unsafe cast - prefer safe cast (as?)",
-                Regex("""@Suppress""") to "Suppressed warnings",
+            // Quality patterns
+            val qualityPatterns = mapOf(
+                Regex("""(?i)\bTODO\b""") to "TODO in code",
+                Regex("""(?i)\bFIXME\b""") to "FIXME in code",
+                Regex("""(?i)\bHACK\b""") to "HACK in code",
+                Regex("""(?i)\bXXX\b""") to "XXX in code",
+                Regex("""System\.out\.print""") to "System.out usage - prefer logger",
+                Regex("""printStackTrace""") to "printStackTrace - prefer logger",
+                Regex("""\.printStackTrace\(\)""") to "printStackTrace in catch block",
+                Regex("""\bnull\s*!""") to "!! assertion may cause NPE",
+                Regex("""as\s+\w+""") to "Unsafe cast - prefer safe cast (as?)",
+                Regex("""@Suppress""") to "Suppressed warnings - should verify",
             )
-            for ((pattern, warning in quality ifTextwarning '${pattern.pattern}')")
+            for ((pattern, warning) in qualityPatterns) {
+                if (pattern.containsMatchIn(outputText)) {
+                    qualityFlags.add("$warning (matched pattern)")
+                }
             }
         }
 
