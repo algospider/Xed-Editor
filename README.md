@@ -1,15 +1,21 @@
 <div align="center">
-  <img src="/fastlane/metadata/android/en-US/images/icon.png" alt="Xed-Editor Icon" width="128" height="128" />
+  <img src="https://raw.githubusercontent.com/algospider/Xed-Editor/main/fastlane/metadata/android/en-US/images/icon.png" alt="Xed-Editor Icon" width="128" height="128" />
 </div>
 
 <h1 align="center">Xed-Editor</h1>
+
+<p align="center">
+  <em>An AI-powered code editor for Android</em>
+  <br />
+  <strong>Cursor / Windsurf — but open source and runs on your phone.</strong>
+</p>
 
 <p align="center">
   <a href="https://github.com/algospider/Xed-Editor/actions/workflows/android.yml">
     <img src="https://github.com/algospider/Xed-Editor/actions/workflows/android.yml/badge.svg?event=push" alt="Android CI" />
   </a>
   <a href="https://github.com/algospider/Xed-Editor/releases">
-    <img src="https://img.shields.io/github/downloads/algospider/Xed-Editor/total?label=Downloads&color=blue" alt="Download count" />
+    <img src="https://img.shields.io/github/downloads/algospider/Xed-Editor/total?label=Downloads&color=blue" alt="Downloads" />
   </a>
   <a href="https://discord.gg/6bKzcQRuef">
     <img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" />
@@ -24,93 +30,194 @@
 
 ---
 
-An Android code editor with AI built in. Fork of the original by Rohit Kushvaha, maintained by [algospider](https://github.com/algospider).
+## Overview
 
-## What is this?
+Xed-Editor is a full-featured **code editor for Android** that brings desktop-class development to your phone. Built on a modern **Kotlin + Jetpack Compose** stack, it packs in a proper terminal, language server support, and a multi-agent AI system — all running locally with **zero telemetry**.
 
-Xed is a code editor for Android that runs a full terminal (Termux-based), has LSP support for a bunch of languages, and integrates multiple AI agents so you can edit code through chat. It's kind of like having Cursor or Windsurf on your phone, except it's open source and doesn't phone home.
+> Forked from [Rohit Kushvaha's](https://github.com/rohitkushvaha) original work, actively maintained by [algospider (Mohan Sharma)](https://github.com/algospider).
 
-The built-in "vibe coding" agent runs on-device — reads your project, makes edits, runs commands, manages git. All through a multi-agent pipeline that keeps track of context, loops, and tool calls.
+---
 
-## Features that actually matter
+## Features
 
-- **AI agents** — built-in native agent + support for Gemini CLI, OpenCode, Codex CLI, Antigravity. Pick your poison.
-- **Terminal** — proper Termux terminal with proot/Ubuntu support, session management, extra keys
-- **Code intelligence** — LSP for Python, TS/JS, HTML, CSS, JSON, XML, Markdown, Bash. Diagnostics, completions, go-to-def, hover docs
-- **Editor** — SoraX engine with syntax highlighting, minimap, multi-cursor, code folding, bracket matching
-- **Search** — index-based code search via Room DB, find/replace in files, command palette
-- **Customizable** — Material 3 theming, custom fonts for editor/terminal/UI, keybinds, icon packs, plugins
-- **No tracking** — zero telemetry, no Firebase, no analytics. Your code doesn't leave your device unless you want it to
+### 🤖 AI Agents
+- **Native vibe-coding agent** — multi-pipeline architecture (GenerationHandler, transformer chain, 30+ tools, security hooks, context memory)
+- **Multi-provider** — OpenAI-compatible APIs, Google AI, Claude, Gemini CLI, OpenCode, Codex CLI, Antigravity
+- **MCP bridge** — external agents can hook into the same editor tooling via the Model Context Protocol
+- **On-device** — no data leaves your phone unless you configure otherwise
+
+### 🖥️ Terminal
+- Full **Termux**-based terminal with proot/Ubuntu chroot support
+- Session management, extra keys, customizable keybinds
+- Working directory integration with the editor
+
+### 📝 Code Intelligence (LSP)
+- Diagnostics, completions, go-to-definition, hover documentation
+- Languages: Python, TypeScript/JavaScript, HTML, CSS, JSON, XML, Markdown, Bash
+- Dynamic file-type registration and extensible server management
+
+### ✏️ Editor (SoraX Engine)
+- Syntax highlighting, minimap, multi-cursor editing, code folding, bracket matching
+- Drag-and-drop split panes, smart toolbar, full-screen mode
+- Custom fonts for editor, terminal, and UI
+
+### 🔍 Search
+- Index-based code search via **Room DB** (persistent, fast)
+- Find/replace across files, command palette
+- Git status and file information in properties panel
+
+### 🎨 Customization
+- **Material 3** theming with dynamic colors
+- Custom fonts, icon packs, keybinds, auto-closing brackets
+- Plugin system with extension repository and detail screens
+
+### 🔒 Privacy
+- **Zero telemetry** — no Firebase, no analytics, no tracking
+- Your code stays on your device. No phone-home.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Language** | Kotlin 2.3.0 |
+| **UI** | Jetpack Compose + Material 3 |
+| **Editor Engine** | SoraX (TextMate grammars, Tree-sitter, Monarch) |
+| **Build** | AGP 8.13.1, Gradle 8.x, KSP |
+| **Networking** | Ktor, OkHttp (with SSE) |
+| **Persistence** | Room, DataStore Preferences |
+| **AI/LLM** | OpenAI-compatible APIs, Gemini, Claude, Anthropic |
+| **Protocol** | Model Context Protocol (MCP) Kotlin SDK |
+| **Terminal** | Termux (emulator + view) |
+| **Git** | JGit |
+| **Min SDK** | 26 (Android 8.0) |
+
+---
 
 ## Screenshots
 
 <div align="center">
-  <img src="/fastlane/metadata/android/en-US/images/phoneScreenshots/01.jpg" width="30%" />
-  <img src="/fastlane/metadata/android/en-US/images/phoneScreenshots/02.jpg" width="30%" />
-  <img src="/fastlane/metadata/android/en-US/images/phoneScreenshots/03.jpg" width="30%" />
+  <img src="https://raw.githubusercontent.com/algospider/Xed-Editor/main/fastlane/metadata/android/en-US/images/phoneScreenshots/01.jpg" width="30%" alt="Screenshot 1" />
+  <img src="https://raw.githubusercontent.com/algospider/Xed-Editor/main/fastlane/metadata/android/en-US/images/phoneScreenshots/02.jpg" width="30%" alt="Screenshot 2" />
+  <img src="https://raw.githubusercontent.com/algospider/Xed-Editor/main/fastlane/metadata/android/en-US/images/phoneScreenshots/03.jpg" width="30%" alt="Screenshot 3" />
 </div>
 
-## Getting started
+---
 
-1. Grab the [latest APK](https://github.com/algospider/Xed-Editor/releases) (Android 8.0+)
-2. Open the AI sheet from the toolbar
-3. Drop in an API key for whatever agent you want to use
-4. That's it — start typing what you want done
+## Getting Started
 
-Nightly debug builds are on [GitHub Actions](https://github.com/algospider/Xed-Editor/actions) if you're feeling adventurous.
+1. **Download** the [latest APK](https://github.com/algospider/Xed-Editor/releases) (requires Android 8.0+)
+2. **Open** the AI sheet from the toolbar
+3. **Add** an API key for your preferred AI provider
+4. **Start coding** — just type what you want done
 
-## Release workflow
+> Nightly debug builds are available via [GitHub Actions](https://github.com/algospider/Xed-Editor/actions). Grab them if you're feeling adventurous.
 
-Releases are triggered manually from GitHub Actions (`Android Release CI` workflow):
+---
+
+## Project Structure
+
+```
+Xed-Editor/
+├── app/                          # Main application module
+├── core/
+│   ├── main/                     # Core app logic
+│   ├── ai/                       # AI integration layer
+│   ├── vibe-coding/              # Vibe-coding agent system
+│   │   ├── ai-core/              # Core AI abstractions
+│   │   ├── ai-models/            # LLM model definitions
+│   │   ├── ai-providers/         # Provider implementations
+│   │   ├── ai-service/           # AI service orchestration
+│   │   ├── ai-streaming/         # Streaming response handling
+│   │   ├── ai-integration/       # Integration glue
+│   │   ├── ai-mcp-client/        # MCP client bridge
+│   │   ├── ai-persistence/       # AI session & context storage
+│   │   ├── agent-runtime/        # Tool execution engine
+│   │   └── agent-tools-search/   # Code search tooling
+│   ├── components/               # Shared UI components
+│   ├── resources/                # Resources & theming
+│   ├── extension/                # Plugin/extension system
+│   ├── terminal-emulator/        # Terminal emulation
+│   ├── terminal-view/            # Terminal UI
+│   └── termux-shared/            # Termux integration
+├── soraX/                        # SoraX editor engine (submodule)
+├── plugin-sdk/                   # Plugin development SDK
+├── baselineprofile/              # Baseline profile module
+├── benchmark/                    # Benchmarking module
+├── docs/                         # Documentation
+└── scripts/                      # Utility scripts
+```
+
+---
+
+## Release Workflow
+
+Releases are triggered manually from **GitHub Actions** (`Android Release CI` workflow):
 
 1. Go to **Actions → Android Release CI → Run workflow**
 2. Enter the version name (or leave blank to use `version.properties`)
-3. Optionally enter changelog notes, or let it pull from `CHANGELOG.md`
-4. The workflow builds the signed APK, creates a GitHub release, and auto-bumps `versionCode`
+3. Optionally add changelog notes — defaults to `CHANGELOG.md`
+4. The workflow builds a signed APK, creates a GitHub release, and auto-bumps `versionCode`
 
-For local version bumps, use `./scripts/bump-version.sh`:
-```
+### Local version bumping
+
+```bash
 ./scripts/bump-version.sh patch     # 3.2.9 → 3.2.10
 ./scripts/bump-version.sh minor     # 3.2.9 → 3.3.0
 ./scripts/bump-version.sh major     # 3.2.9 → 4.0.0
-./scripts/bump-version.sh manual 3.5.0  # set specific version
+./scripts/bump-version.sh manual 3.5.0   # specific version
 ```
 
-Add release notes to `CHANGELOG.md` under the new version header before running the release.
+> Before running the release, add notes to `CHANGELOG.md` under the new version header.
 
-## How the AI actually works
+---
 
-The native vibe-coding agent uses a pipeline architecture:
+## How the AI Works
 
-- **GenerationHandler** manages multi-step LLM interactions — calls the model, handles tool call loops, compaction, doom-loop detection
-- **Transformer chain** — input/output transformers that handle placeholders, prompt injection, think tags, base64 images, lorebook documents
-- **Tool system** — 30+ tools the agent can call (read/write files, search, run commands, git, LSP queries, web fetch, etc.)
+The native vibe-coding agent uses a **pipeline architecture**:
+
+- **GenerationHandler** — manages multi-step LLM interactions (model calls, tool call loops, compaction, doom-loop detection)
+- **Transformer chain** — input/output transformers for placeholders, prompt injection, think tags, base64 images, lorebook documents
+- **Tool system** — 30+ tools for reading/writing files, search, command execution, git, LSP queries, web fetching
 - **Security hooks** — blocks dangerous patterns (eval, pickle, SQL injection) before writes
-- **Context memory** — keeps track of project structure, recent edits, tool history across the session
+- **Context memory** — tracks project structure, recent edits, and tool history across the session
 
-Under the hood it's talking to OpenAI-compatible APIs, Google AI, Claude, or whatever provider you configure. The MCP bridge lets external agents hook into the same editor tools.
+Under the hood it talks to any **OpenAI-compatible API**, Google AI, Claude, or custom providers you configure. The **MCP bridge** allows external agents to hook into the same editor tooling.
 
-## Why another editor?
+---
 
-Because nothing on Android had all of these things together. Existing editors either had no AI, no terminal, no LSP, or were abandonware. This one is actively maintained and actually works on a phone screen.
+## Why Another Editor?
 
-## Community
+Because nothing on Android had all of these in one package:
 
-- [Discord](https://discord.gg/6bKzcQRuef) — where most of the chat happens
-- [Telegram](https://t.me/XedEditor) — announcements
-- [GitHub Issues](https://github.com/algospider/Xed-Editor/issues) — bugs, feature requests, rants
+| Feature | Xed-Editor | Others |
+|---------|-----------|--------|
+| AI agents | ✅ Native + multi-provider | ❌ Rare or proprietary |
+| Full terminal | ✅ Termux-based | ❌ Limited or none |
+| LSP support | ✅ Multi-language | ❌ Often missing or basic |
+| Open source | ✅ GPLv3 | ❌ Usually closed |
+| Privacy | ✅ Zero telemetry | ❌ Analytics galore |
+| Active dev | ✅ Regular releases | ❌ Abandoned |
 
-## Credits
+---
 
-This is a fork of Rohit Kushvaha's original work, maintained by [algospider](https://github.com/algospider) (Mohan Sharma). The vibe-coding agent uses [RikkaHub](https://github.com/RikkaHub) under the hood.
+## Community & Support
 
-Thanks to everyone who's submitted PRs, filed bug reports, or just used the thing.
+- [Discord](https://discord.gg/6bKzcQRuef) — active community chat
+- [Telegram](https://t.me/XedEditor) — announcements channel
+- [GitHub Issues](https://github.com/algospider/Xed-Editor/issues) — bugs, feature requests, ideas
+- [Contributing Guide](docs/CONTRIBUTING.md) — how to build & contribute
+
+---
 
 ## License
 
-GPL v3. See [LICENSE](LICENSE).
+**GPL v3** — see [LICENSE](LICENSE).
 
+```
 Copyright (C) 2025 Rohit Kushvaha — Fork maintained by algospider (Mohan Sharma)
+```
 
 <div align="center">
   <sub>Made with ❤️ by the Xed-Editor Community</sub>

@@ -17,6 +17,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.rk.theme.DesignTokens
 
+/**
+ * A standardized drag handle for bottom sheets.
+ *
+ * Matches Material 3 bottom sheet drag handle spec:
+ * - 32dp wide, 4dp tall (M3 recommended)
+ * - Rounded 2dp corners
+ * - Subtle color based on theme
+ */
 @Composable
 fun XedDragHandle(
     isDragging: Boolean = false,
@@ -24,12 +32,16 @@ fun XedDragHandle(
     onClick: (() -> Unit)? = null,
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val handleColor = if (isDragging) colorScheme.primary.copy(alpha = 0.5f) else colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+    val handleColor = if (isDragging) {
+        colorScheme.primary.copy(alpha = 0.5f)
+    } else {
+        colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
+    }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(16.dp)
+            .height(DesignTokens.BottomSheet.dragHandleHitAreaHeight)
             .then(
                 if (onClick != null) {
                     Modifier.clickable(role = Role.Button, onClick = onClick)
@@ -40,8 +52,14 @@ fun XedDragHandle(
     ) {
         Box(
             modifier = Modifier
-                .size(width = DesignTokens.BottomSheet.dragHandleWidth, height = DesignTokens.BottomSheet.dragHandleHeight)
-                .background(color = handleColor, shape = DesignTokens.CornerRadius.xsmall),
+                .size(
+                    width = DesignTokens.BottomSheet.dragHandleWidth,
+                    height = DesignTokens.BottomSheet.dragHandleHeight,
+                )
+                .background(
+                    color = handleColor,
+                    shape = RoundedCornerShape(DesignTokens.BottomSheet.dragHandleCornerRadius),
+                ),
         )
     }
 }

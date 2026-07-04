@@ -74,8 +74,11 @@ object DesignTokens {
         val elevationTablet = 8.dp
         val contentPadding = Spacing.large
         val dragHandleWidth = 32.dp
-        val dragHandleHeight = 3.dp
+        val dragHandleHeight = 4.dp
+        val dragHandleHitAreaHeight = 20.dp
+        val dragHandleCornerRadius = 2.dp
         val minSheetHeight = 260.dp
+        val headerMinHeight = 48.dp
     }
 
     object Gradient {

@@ -4,11 +4,8 @@ package com.rk.ai.nativeagent.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -16,6 +13,7 @@ import com.rk.ai.nativeagent.engine.VibeCodingEngine
 import com.rk.ai.providers.Model
 import com.rk.ai.providers.ModelType
 import com.rk.ai.providers.ProviderSetting
+import com.rk.components.XedBottomSheet
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.launch
@@ -47,67 +45,47 @@ fun VibeCodingSettingsSheet(
             }
     }
 
-    ModalBottomSheet(
+    XedBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        sheetMaxWidth = androidx.compose.ui.unit.Dp.Unspecified,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+        title = {
+            Text(
+                text = "VibeCoding Settings",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        showCloseButton = true,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 16.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "VibeCoding Settings",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Outlined.Close, contentDescription = "Close")
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            if (editProviderId != null) {
-                ProviderEditor(
-                    providerId = editProviderId!!,
-                    settings = settings,
-                    engine = engine,
-                    colorScheme = colorScheme,
-                    scope = scope,
-                    onBack = { editProviderId = null },
-                )
-            } else {
-                SettingsContent(
-                    engine = engine,
-                    settings = settings,
-                    colorScheme = colorScheme,
-                    scope = scope,
-                    selectedModelId = selectedModelId,
-                    allChatModels = allChatModels,
-                    onSelectModel = { selectedModelId = it },
-                    onEditProvider = { editProviderId = it },
-                    onAddProvider = { showAddProvider = true },
-                    onEditMcpServer = { editMcpServerId = it },
-                    onAddMcpServer = { showAddMcpServer = true },
-                    onApplyModel = {
-                        scope.launch {
-                            engine.settingsStore.update { s -> s.copy(chatModelId = selectedModelId) }
-                        }
-                        onDismiss()
-                    },
-                )
-            }
+        if (editProviderId != null) {
+            ProviderEditor(
+                providerId = editProviderId!!,
+                settings = settings,
+                engine = engine,
+                colorScheme = colorScheme,
+                scope = scope,
+                onBack = { editProviderId = null },
+            )
+        } else {
+            SettingsContent(
+                engine = engine,
+                settings = settings,
+                colorScheme = colorScheme,
+                scope = scope,
+                selectedModelId = selectedModelId,
+                allChatModels = allChatModels,
+                onSelectModel = { selectedModelId = it },
+                onEditProvider = { editProviderId = it },
+                onAddProvider = { showAddProvider = true },
+                onEditMcpServer = { editMcpServerId = it },
+                onAddMcpServer = { showAddMcpServer = true },
+                onApplyModel = {
+                    scope.launch {
+                        engine.settingsStore.update { s -> s.copy(chatModelId = selectedModelId) }
+                    }
+                    onDismiss()
+                },
+            )
         }
     }
 

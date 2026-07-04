@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.*
@@ -22,6 +21,7 @@ import com.rk.ai.nativeagent.engine.VibeCodingState
 import com.rk.ai.nativeagent.ui.components.*
 import com.rk.ai.nativeagent.ui.panels.*
 import com.rk.ai.persistence.settings.getCurrentAssistant
+import com.rk.components.XedBottomSheet
 import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
 
@@ -71,112 +71,113 @@ fun VibeCodingPanel(
 
     // ── Modal bottom sheets for tool panels ──
     if (activePanel != ToolPanel.NONE) {
-        ModalBottomSheet(
+        XedBottomSheet(
             onDismissRequest = { activePanel = ToolPanel.NONE },
             sheetState = sheetState,
-            sheetMaxWidth = androidx.compose.ui.unit.Dp.Unspecified,
-            containerColor = colorScheme.surfaceContainerHigh,
-            contentColor = colorScheme.onSurface,
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            showDragHandle = true,
+            showCloseButton = false, // each panel has its own close button
+            title = null,
         ) {
-            when (activePanel) {
-                ToolPanel.COMMANDS -> {
-                    val builtinCommands = remember {
-                        listOf(
-                            PaletteCommand("init", "Init", "Initialize project instructions (AGENTS.md)", "Initialize project with AGENTS.md based on codebase analysis", "Project"),
-                            PaletteCommand("review", "Review", "Review recent code changes", "Review all uncommitted changes for bugs and quality", "Code"),
-                            PaletteCommand("test", "Test", "Run tests and analyze results", "Run the test suite and report failures with fix suggestions", "Code"),
-                            PaletteCommand("commit", "Commit", "Stage and commit changes", "Stage all changes and create a descriptive commit", "Git"),
-                            PaletteCommand("push", "Push", "Push commits to remote", "Push the current branch to origin", "Git"),
-                            PaletteCommand("changelog", "Changelog", "Generate changelog from recent commits", "Generate a changelog file from git history", "Project"),
-                            PaletteCommand("spellcheck", "Spell Check", "Check spelling in markdown files", "Run spell check on all changed markdown files", "Code"),
-                            PaletteCommand("translate", "Translate", "Translate documentation", "Translate changed documentation to configured languages", "Project"),
-                            PaletteCommand("summarize", "Summarize", "Summarize current conversation", "Create a summary of the conversation context for reference", "General"),
-                            PaletteCommand("compact", "Compact", "Compact conversation context", "Compact the conversation to free context window space", "General"),
-                            PaletteCommand("learn", "Learn", "Extract learnings to AGENTS.md", "Analyze session and extract non-obvious learnings to AGENTS.md files", "Project"),
-                            PaletteCommand("rmslop", "Remove Slop", "Remove AI-generated code slop", "Clean up unnecessary comments, defensive checks, and style inconsistencies", "Code"),
-                            PaletteCommand("issues", "Issues", "Find matching GitHub issues", "Search GitHub issues matching the current context", "Git"),
-                            PaletteCommand("feature-dev", "Feature Dev", "Guided feature development", "Systematic 7-phase feature dev: discover, explore, design, implement, review", "Feature"),
-                        )
-                    }
-                    val fileCommands = remember(state.commandCatalog) {
-                        engine.getCommandCatalog()
-                            .filter { it.id.startsWith("file:") }
-                            .map { cmd ->
-                                PaletteCommand(
-                                    id = cmd.id,
-                                    name = cmd.title,
-                                    description = cmd.description,
-                                    prompt = cmd.prompt,
-                                    category = cmd.category,
-                                )
-                            }
-                    }
-                    val displayedBuiltins = remember(builtinCommands, fileCommands) {
-                        val fileCommandIds = fileCommands.map { it.id.removePrefix("file:") }.toSet()
-                        builtinCommands.filter { it.id !in fileCommandIds }
-                    }
-                    CommandPaletteSheet(
-                        builtinCommands = displayedBuiltins,
-                        fileCommands = fileCommands,
-                        onDismiss = { activePanel = ToolPanel.NONE },
-                        onExecuteCommand = { command ->
-                            engine.sendMessage(command.prompt)
-                            activePanel = ToolPanel.NONE
-                        },
-                        onRefreshCommands = { engine.refreshCommands() },
-                        modifier = Modifier.fillMaxHeight(0.85f),
-                    )
-                }
-                ToolPanel.SKILLS -> {
-                    val settings by engine.settingsStore.settingsFlow.collectAsState()
-                    val currentAssistant = settings.getCurrentAssistant()
-                    SkillBrowserPanel(
-                        skillsDir = "$workspacePath/.xed/skills",
-                        enabledSkills = currentAssistant.enabledSkills,
-                        onToggleSkill = { skillName, enabled ->
-                            scope.launch {
-                                engine.settingsStore.update { s ->
-                                    s.copy(
-                                        assistants = s.assistants.map { a ->
-                                            if (a.id == currentAssistant.id) {
-                                                val updatedSkills = if (enabled) {
-                                                    a.enabledSkills + skillName
-                                                } else {
-                                                    a.enabledSkills - skillName
-                                                }
-                                                a.copy(enabledSkills = updatedSkills)
-                                            } else a
-                                        }
+            Box(modifier = Modifier.fillMaxHeight(0.88f)) {
+                when (activePanel) {
+                    ToolPanel.COMMANDS -> {
+                        val builtinCommands = remember {
+                            listOf(
+                                PaletteCommand("init", "Init", "Initialize project instructions (AGENTS.md)", "Initialize project with AGENTS.md based on codebase analysis", "Project"),
+                                PaletteCommand("review", "Review", "Review recent code changes", "Review all uncommitted changes for bugs and quality", "Code"),
+                                PaletteCommand("test", "Test", "Run tests and analyze results", "Run the test suite and report failures with fix suggestions", "Code"),
+                                PaletteCommand("commit", "Commit", "Stage and commit changes", "Stage all changes and create a descriptive commit", "Git"),
+                                PaletteCommand("push", "Push", "Push commits to remote", "Push the current branch to origin", "Git"),
+                                PaletteCommand("changelog", "Changelog", "Generate changelog from recent commits", "Generate a changelog file from git history", "Project"),
+                                PaletteCommand("spellcheck", "Spell Check", "Check spelling in markdown files", "Run spell check on all changed markdown files", "Code"),
+                                PaletteCommand("translate", "Translate", "Translate documentation", "Translate changed documentation to configured languages", "Project"),
+                                PaletteCommand("summarize", "Summarize", "Summarize current conversation", "Create a summary of the conversation context for reference", "General"),
+                                PaletteCommand("compact", "Compact", "Compact conversation context", "Compact the conversation to free context window space", "General"),
+                                PaletteCommand("learn", "Learn", "Extract learnings to AGENTS.md", "Analyze session and extract non-obvious learnings to AGENTS.md files", "Project"),
+                                PaletteCommand("rmslop", "Remove Slop", "Remove AI-generated code slop", "Clean up unnecessary comments, defensive checks, and style inconsistencies", "Code"),
+                                PaletteCommand("issues", "Issues", "Find matching GitHub issues", "Search GitHub issues matching the current context", "Git"),
+                                PaletteCommand("feature-dev", "Feature Dev", "Guided feature development", "Systematic 7-phase feature dev: discover, explore, design, implement, review", "Feature"),
+                            )
+                        }
+                        val fileCommands = remember(state.commandCatalog) {
+                            engine.getCommandCatalog()
+                                .filter { it.id.startsWith("file:") }
+                                .map { cmd ->
+                                    PaletteCommand(
+                                        id = cmd.id,
+                                        name = cmd.title,
+                                        description = cmd.description,
+                                        prompt = cmd.prompt,
+                                        category = cmd.category,
                                     )
                                 }
-                            }
-                        },
-                        onEditSkill = { engine.openFileInEditor(it) },
+                        }
+                        val displayedBuiltins = remember(builtinCommands, fileCommands) {
+                            val fileCommandIds = fileCommands.map { it.id.removePrefix("file:") }.toSet()
+                            builtinCommands.filter { it.id !in fileCommandIds }
+                        }
+                        CommandPaletteSheet(
+                            builtinCommands = displayedBuiltins,
+                            fileCommands = fileCommands,
+                            onDismiss = { activePanel = ToolPanel.NONE },
+                            onExecuteCommand = { command ->
+                                engine.sendMessage(command.prompt)
+                                activePanel = ToolPanel.NONE
+                            },
+                            onRefreshCommands = { engine.refreshCommands() },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    ToolPanel.SKILLS -> {
+                        val settings by engine.settingsStore.settingsFlow.collectAsState()
+                        val currentAssistant = settings.getCurrentAssistant()
+                        SkillBrowserPanel(
+                            skillsDir = "$workspacePath/.xed/skills",
+                            enabledSkills = currentAssistant.enabledSkills,
+                            onToggleSkill = { skillName, enabled ->
+                                scope.launch {
+                                    engine.settingsStore.update { s ->
+                                        s.copy(
+                                            assistants = s.assistants.map { a ->
+                                                if (a.id == currentAssistant.id) {
+                                                    val updatedSkills = if (enabled) {
+                                                        a.enabledSkills + skillName
+                                                    } else {
+                                                        a.enabledSkills - skillName
+                                                    }
+                                                    a.copy(enabledSkills = updatedSkills)
+                                                } else a
+                                            }
+                                        )
+                                    }
+                                }
+                            },
+                            onEditSkill = { engine.openFileInEditor(it) },
+                            onDismiss = { activePanel = ToolPanel.NONE },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    ToolPanel.AGENTS -> AgentConfigPanel(
+                        settingsStore = engine.settingsStore,
                         onDismiss = { activePanel = ToolPanel.NONE },
-                        modifier = Modifier.fillMaxHeight(0.85f),
+                        modifier = Modifier.fillMaxSize(),
                     )
+                    ToolPanel.PERMISSIONS -> PermissionEditorPanel(
+                        engine = engine,
+                        onDismiss = { activePanel = ToolPanel.NONE },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    ToolPanel.INSTRUCTIONS -> InstructionsEditorPanel(
+                        workspacePath = workspacePath,
+                        onDismiss = { activePanel = ToolPanel.NONE },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    ToolPanel.PLUGINS -> PluginManagerPanel(
+                        onDismiss = { activePanel = ToolPanel.NONE },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    ToolPanel.NONE -> {}
                 }
-                ToolPanel.AGENTS -> AgentConfigPanel(
-                    settingsStore = engine.settingsStore,
-                    onDismiss = { activePanel = ToolPanel.NONE },
-                    modifier = Modifier.fillMaxHeight(0.85f),
-                )
-                ToolPanel.PERMISSIONS -> PermissionEditorPanel(
-                    engine = engine,
-                    onDismiss = { activePanel = ToolPanel.NONE },
-                    modifier = Modifier.fillMaxHeight(0.85f),
-                )
-                ToolPanel.INSTRUCTIONS -> InstructionsEditorPanel(
-                    workspacePath = workspacePath,
-                    onDismiss = { activePanel = ToolPanel.NONE },
-                    modifier = Modifier.fillMaxHeight(0.85f),
-                )
-                ToolPanel.PLUGINS -> PluginManagerPanel(
-                    onDismiss = { activePanel = ToolPanel.NONE },
-                    modifier = Modifier.fillMaxHeight(0.85f),
-                )
-                ToolPanel.NONE -> {}
             }
         }
     }

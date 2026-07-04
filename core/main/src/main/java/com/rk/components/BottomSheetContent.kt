@@ -21,17 +21,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rk.theme.DesignTokens
 
+/**
+ * A structured layout for bottom sheet content with optional title,
+ * text description, custom content, and action buttons.
+ *
+ * Designed to be used inside [XedBottomSheet] for sheets that need
+ * a title, scrollable body, and a button row at the bottom.
+ *
+ * @param buttons Action buttons at the bottom (e.g. Cancel, Confirm).
+ * @param title Optional title displayed at the top.
+ * @param text Optional body text.
+ * @param content Optional custom composable content between text and buttons.
+ */
 @Composable
 fun BottomSheetContent(
     buttons: @Composable RowScope.() -> Unit,
     modifier: Modifier = Modifier,
     title: (@Composable () -> Unit)? = null,
-    text: @Composable (() -> Unit)? = null,
-    content: @Composable (() -> Unit)? = null,
+    text: (@Composable (() -> Unit))? = null,
+    content: (@Composable (() -> Unit))? = null,
 ) {
     val padding = DesignTokens.BottomSheet.contentPadding
 
     Column(modifier = modifier.fillMaxWidth()) {
+        // Scrollable content area
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -53,8 +66,9 @@ fun BottomSheetContent(
             }
         }
 
+        // Divider + buttons
         HorizontalDivider(
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
             thickness = DesignTokens.Divider.thin,
         )
         Row(
@@ -69,3 +83,5 @@ fun BottomSheetContent(
         }
     }
 }
+
+
