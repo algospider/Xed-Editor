@@ -134,8 +134,6 @@ data class VibeCodingState(
         AgentPhase.EXPLORING -> "Exploring"
         AgentPhase.EXECUTING -> "Executing"
         AgentPhase.VERIFYING -> "Verifying"
-        AgentPhase.REVIEWING -> "Reviewing"
-        AgentPhase.TESTING -> "Testing"
         AgentPhase.COMPLETED -> "Completed"
         AgentPhase.FAILED -> "Failed"
     }
@@ -150,8 +148,6 @@ data class VibeCodingState(
         AgentPhase.EXPLORING -> 0xFF26C6DA
         AgentPhase.EXECUTING -> 0xFFEF5350
         AgentPhase.VERIFYING -> 0xFFAB47BC
-        AgentPhase.REVIEWING -> 0xFFFF7043
-        AgentPhase.TESTING -> 0xFF7E57C2
         AgentPhase.COMPLETED -> 0xFF66BB6A
         AgentPhase.FAILED -> 0xFFEF5350
     }

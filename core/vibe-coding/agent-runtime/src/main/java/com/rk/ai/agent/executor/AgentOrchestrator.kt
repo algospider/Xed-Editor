@@ -20,7 +20,7 @@ private const val TAG = "AgentOrchestrator"
 
 enum class AgentPhase {
     IDLE, PLANNING, ANALYZING, INDEXING, EXPLORING,
-    EXECUTING, VERIFYING, REVIEWING, TESTING, COMPLETED, FAILED
+    EXECUTING, VERIFYING, COMPLETED, FAILED
 }
 
 data class OrchestratorResult(

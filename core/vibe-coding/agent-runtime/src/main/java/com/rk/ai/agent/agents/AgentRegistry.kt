@@ -24,6 +24,7 @@ data class SubAgentRegistration(
 
 data class FileBasedSubAgent(
     val definition: FileAgentDefinition,
+    val generateWithLLM: (suspend (prompt: String, context: String) -> String)? = null,
 ) : SubAgent {
     override val name: String get() = definition.name.lowercase().replace(" ", "-")
     override val description: String get() = definition.description
@@ -36,6 +37,22 @@ data class FileBasedSubAgent(
     )
 
     override suspend fun execute(task: AgentTask): AgentResult {
+        if (generateWithLLM != null) {
+            val contextStr = task.contextMessages.joinToString("\n")
+            val fullPrompt = buildString {
+                appendLine(definition.prompt)
+                appendLine()
+                appendLine("## Task")
+                appendLine(task.prompt)
+                if (contextStr.isNotBlank()) {
+                    appendLine()
+                    appendLine("## Context")
+                    appendLine(contextStr)
+                }
+            }
+            val output = generateWithLLM(fullPrompt, contextStr)
+            return AgentResult.Success(output = output, summary = "Agent '${definition.name}' completed task")
+        }
         return AgentResult.Success(
             output = buildString {
                 appendLine("## Agent: ${definition.name}")
@@ -60,6 +77,7 @@ class AgentRegistry(
     private val ideService: IdeService,
     private val providerManager: ProviderManager,
     private val settingsStore: SettingsStore,
+    private val generateWithLLM: (suspend (prompt: String, context: String) -> String)? = null,
 ) {
     private val agents = mutableMapOf<String, SubAgentRegistration>()
 
@@ -75,7 +93,7 @@ class AgentRegistry(
         val fileAgents = AgentFileLoader.listAgents(context)
         for (agentDef in fileAgents) {
             if (agentDef.hidden) continue
-            val agent = FileBasedSubAgent(agentDef)
+            val agent = FileBasedSubAgent(definition = agentDef, generateWithLLM = generateWithLLM)
             if (!agents.containsKey(agent.name)) {
                 agents[agent.name] = SubAgentRegistration(agent, true)
             }

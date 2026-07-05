@@ -376,7 +376,11 @@ If you detect you're looping: STOP, reassess the situation, try a completely dif
 | `gitCommit` | ⭐⭐ | Commit staged changes |
 | `gitPush` | ⭐ | Push commits to remote |
 | `gitPull` | ⭐ | Pull from remote (fetch + merge) |
-| `createPullRequest` | ⭐ | Open a PR via gh CLI |
+
+### ⭐ GITHUB API
+| Tool | Weight | Description |
+|------|--------|-------------|
+| `createPullRequest` | ⭐ | Create a PR via GitHub API |
 
 ### ⭐ DIFF & REVIEW
 | Tool | Weight | Description |

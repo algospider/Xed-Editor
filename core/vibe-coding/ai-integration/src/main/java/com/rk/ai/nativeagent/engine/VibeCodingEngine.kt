@@ -222,7 +222,17 @@ class VibeCodingEngine(
         projectIndexer = projectIndexer,
     )
 
-    val agentRegistry = AgentRegistry(context, ideService, providerManager, settingsStore)
+    val agentRegistry = AgentRegistry(context, ideService, providerManager, settingsStore) { prompt, contextStr ->
+        this@VibeCodingEngine.generateWithLLM(
+            prompt = prompt,
+            tools = buildToolList(
+                settingsStore.settingsFlow.value.getCurrentAssistant(),
+                settingsStore.settingsFlow.value,
+            ),
+            context = com.rk.ai.agent.context.ContextBundle(),
+            conversationHistory = _state.value.messages,
+        )
+    }
 
     private val storedCommandCatalog = mutableListOf<CommandCatalogEntry>()
     private var xedConfig = XedConfig()
@@ -530,60 +540,6 @@ class VibeCodingEngine(
         },
     )
 
-    private val planTool = Tool(
-        name = "plan",
-        description = "Create a structured multi-step execution plan. Call this BEFORE starting complex multi-file tasks. The plan creates a tracked todo list and returns a clear step-by-step breakdown. Each step should be specific and actionable.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("goal") { put("type", "string"); put("description", "The overall goal of this plan") }
-                    putJsonObject("steps") {
-                        put("type", "string")
-                        put("description", "JSON array of step strings describing each action. Example: [\"Read the current implementation in src/Foo.kt\", \"Update the Foo class to support the new feature\", \"Add tests for the new functionality\", \"Run the test suite to verify\"]")
-                    }
-                },
-                required = listOf("goal", "steps"),
-            )
-        },
-        execute = { args ->
-            val goal = args.asJsonObject["goal"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("Error: missing required argument 'goal'"))
-            val stepsElement = args.asJsonObject["steps"]
-                ?: return@Tool listOf(UIMessagePart.Text("Error: missing required argument 'steps'"))
-            val stepsJson = when {
-                stepsElement.isJsonArray -> stepsElement.asJsonArray
-                stepsElement.isJsonPrimitive && stepsElement.asJsonPrimitive.isString -> {
-                    try {
-                        com.google.gson.JsonParser.parseString(stepsElement.asString).asJsonArray
-                    } catch (e: Exception) {
-                        return@Tool listOf(UIMessagePart.Text("Error: invalid JSON in 'steps': ${e.message}"))
-                    }
-                }
-                else -> return@Tool listOf(UIMessagePart.Text("Error: 'steps' must be a JSON array or a JSON string"))
-            }
-
-            val todos = stepsJson.mapIndexed { index, step ->
-                SessionTodo(id = "step-${Uuid.random()}", description = step.asString, status = SessionTodoStatus.PENDING)
-            }
-
-            val sessionId = _state.value.activeSessionId ?: Uuid.random()
-            setSessionTodos(sessionId, todos)
-
-            val planText = buildString {
-                appendLine("## Plan: $goal")
-                appendLine()
-                todos.forEachIndexed { i, todo ->
-                    appendLine("  [ ] Step ${i + 1}: ${todo.description}")
-                }
-                appendLine()
-                appendLine("---")
-                appendLine("Total: ${todos.size} steps")
-                appendLine("Start with Step 1. Update progress with `todowrite` after completing each step.")
-            }
-            listOf(UIMessagePart.Text(planText))
-        },
-    )
-
     private fun applyPermissionRules(cfg: UnifiedConfig) {
         for (rule in cfg.permissionRules) {
             val action = when (rule.action.lowercase()) {
@@ -636,7 +592,6 @@ class VibeCodingEngine(
                 skillManager = skillManager,
             ))
             add(todowriteTool)
-            add(planTool)
             add(listCustomCommandsTool)
         }
 
@@ -864,11 +819,6 @@ class VibeCodingEngine(
     fun sendMessage(text: String, extraParts: List<UIMessagePart> = emptyList()) {
         ensureSessionExists(text.trim())
         val trimmed = text.trim()
-        // Route complex multi-step tasks through the orchestrator
-        if (isComplexTask(trimmed) && extraParts.isEmpty()) {
-            sendOrchestrated(trimmed)
-            return
-        }
         generationPipeline.execute(
             text = trimmed,
             extraParts = extraParts,
@@ -980,22 +930,6 @@ class VibeCodingEngine(
         generationPipeline.cancel()
         orchestrator.stop()
         _state.value = _state.value.copy(isProcessing = false, currentPhase = AgentPhase.IDLE)
-    }
-
-    private fun isComplexTask(text: String): Boolean {
-        val lower = text.lowercase()
-        
-        // Only route genuinely large refactors through the orchestrator.
-        // Modern AI agents handle most multi-step tasks fine in the streaming pipeline.
-        val explicitOrchestrate = lower.contains("use the orchestrator") ||
-            lower.contains("use autonomous mode") ||
-            lower.contains("full rewrite")
-        
-        // Only trigger for genuinely large tasks (5+ action verbs = true multi-file refactor)
-        val actionVerbs = listOf("refactor", "implement", "create", "build", "migrate", "rewrite", "convert")
-        val verbCount = actionVerbs.count { lower.contains(it) }
-        
-        return explicitOrchestrate || verbCount >= 5
     }
 
     private fun ensureSessionExists(titleHint: String) {

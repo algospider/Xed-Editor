@@ -17,12 +17,6 @@ class VibeCodingGitTools(private val ideService: IdeService) {
     private fun com.google.gson.JsonElement.workspaceOrPrimary(): String =
         asJsonObject["workspacePath"]?.asJsonPrimitive?.asString ?: ideService.getPrimaryWorkspacePath()
 
-    private fun requireWorkspace(msg: UIMessagePart.Text? = null): String? {
-        val ws = ideService.getPrimaryWorkspacePath()
-        if (ws.isBlank()) return null
-        return ws
-    }
-
     private val getGitStatus = Tool(
         name = "getGitStatus",
         description = "Returns git status: staged, modified, untracked files, and current branch. " +
@@ -38,7 +32,7 @@ class VibeCodingGitTools(private val ideService: IdeService) {
         },
         execute = { args ->
             val workspace = args.workspaceOrPrimary()
-            if (workspace.isBlank()) return@Tool listOf(UIMessagePart.Text("ERROR: No workspace configured. Open a project or provide a workspacePath."))
+            if (workspace.isBlank()) return@Tool listOf(UIMessagePart.Text("ERROR: No workspace configured."))
             try {
                 val status = ideService.getGitStatus(workspace)
                 val text = buildString {
@@ -56,16 +50,14 @@ class VibeCodingGitTools(private val ideService: IdeService) {
                 }
                 listOf(UIMessagePart.Text(text.ifEmpty { "Working tree clean" }))
             } catch (e: Exception) {
-                val ws = ideService.getPrimaryWorkspacePath()
-                val msg = "Workspace: $ws. ${e.message ?: ""}"
-                listOf(UIMessagePart.Text("ERROR: $msg\nSUGGESTION: Is this a git repository? Run 'git init' first if not."))
+                listOf(UIMessagePart.Text("ERROR: ${e.message}\nSUGGESTION: Is this a git repository? Run 'git init' first if not."))
             }
         },
     )
 
     private val getGitDiff = Tool(
         name = "getGitDiff",
-        description = "Returns the UNSTAGED diff. Shows what changes would be committed. " +
+        description = "Returns diff. Shows what changes would be committed. " +
             "Review before committing. Use getGitStatus first to see what files changed. " +
             "Example: {} or {\"workspacePath\": \"/path/to/repo\"}",
         parameters = {
@@ -79,20 +71,20 @@ class VibeCodingGitTools(private val ideService: IdeService) {
         execute = { args ->
             val workspace = args.workspaceOrPrimary()
             val diff = ideService.getGitDiff(workspace)
-            listOf(UIMessagePart.Text(diff.ifEmpty { "No unstaged changes" }))
+            listOf(UIMessagePart.Text(diff.ifEmpty { "No changes" }))
         },
     )
 
     private val gitCommit = Tool(
         name = "gitCommit",
         description = "Commit staged changes. If 'all'=true, auto-stages all modified/deleted files first. " +
-            "Use a clear, concise commit message. Use git status + git diff first to review changes. " +
+            "Use a clear, concise commit message. Use getGitStatus + getGitDiff first to review changes. " +
             "Example: {\"message\": \"fix: resolve login crash\", \"all\": true}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("message") { put("type", "string"); put("description", "Commit message. Use conventional commits format: feat/fix/chore/docs/refactor/test: description") }
-                    putJsonObject("all") { put("type", "boolean"); put("description", "Auto-stage all modified/deleted files (git add -A) before committing") }
+                    putJsonObject("all") { put("type", "boolean"); put("description", "Auto-stage all modified/deleted files before committing") }
                     putJsonObject("workspacePath") { put("type", "string"); put("description", "Path to the git repository (optional)") }
                 },
                 required = listOf("message"),
@@ -101,11 +93,10 @@ class VibeCodingGitTools(private val ideService: IdeService) {
         execute = { args ->
             val obj = args.asJsonObject
             val message = obj["message"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'message'. Example: {\"message\": \"fix: bug description\"}"))
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'message'."))
             val all = obj["all"]?.asJsonPrimitive?.asBoolean ?: false
             val workspace = args.workspaceOrPrimary()
-            val result = ideService.gitCommit(workspace, message, all)
-            listOf(UIMessagePart.Text(result))
+            listOf(UIMessagePart.Text(ideService.gitCommit(workspace, message, all)))
         },
     )
 
@@ -113,7 +104,7 @@ class VibeCodingGitTools(private val ideService: IdeService) {
         name = "gitCheckout",
         description = "Switch branches or restore files. " +
             "Use to move between branches, create new branches, or discard changes. " +
-            "Stashes uncommitted changes if needed. " +
+            "Automatically stashes uncommitted changes if checkout would overwrite them. " +
             "Example: {\"target\": \"feature/new-ui\"} or {\"target\": \"main\"}",
         parameters = {
             InputSchema.Obj(
@@ -128,13 +119,21 @@ class VibeCodingGitTools(private val ideService: IdeService) {
         execute = { args ->
             val obj = args.asJsonObject
             val target = obj["target"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'target'. Specify a branch name or commit hash."))
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'target'."))
+            val createBranch = obj["createBranch"]?.asJsonPrimitive?.asBoolean ?: false
             val workspace = args.workspaceOrPrimary()
             try {
+                if (createBranch) {
+                    val createResult = ideService.gitBranch(workspace, "create", target)
+                    if (createResult.startsWith("error")) return@Tool listOf(UIMessagePart.Text(createResult))
+                }
                 val result = ideService.gitCheckout(workspace, target)
                 listOf(UIMessagePart.Text(result))
             } catch (e: Exception) {
-                listOf(UIMessagePart.Text("ERROR: Checkout failed: ${e.message}\nSUGGESTION: Commit or stash changes first if there are conflicts."))
+                listOf(UIMessagePart.Text(
+                    "ERROR: Checkout failed: ${e.message}\n" +
+                    "SUGGESTION: Commit or stash your changes first, then retry."
+                ))
             }
         },
     )
@@ -158,8 +157,8 @@ class VibeCodingGitTools(private val ideService: IdeService) {
             val maxCount = obj["maxCount"]?.asJsonPrimitive?.asInt ?: 10
             val branch = obj["branch"]?.asJsonPrimitive?.asString
             val workspace = args.workspaceOrPrimary()
-            val result = ideService.runCommand("git log --oneline -$maxCount ${branch ?: ""}".trimEnd(), 30)
-            listOf(UIMessagePart.Text(result.output.ifEmpty { "No commits found" }))
+            val result = ideService.gitLog(workspace, maxCount, branch)
+            listOf(UIMessagePart.Text(result.ifEmpty { "No commits found" }))
         },
     )
 
@@ -183,21 +182,11 @@ class VibeCodingGitTools(private val ideService: IdeService) {
             val action = obj["action"]?.asJsonPrimitive?.asString ?: "list"
             val branchName = obj["branchName"]?.asJsonPrimitive?.asString
             val workspace = args.workspaceOrPrimary()
-            val result = when (action) {
-                "create" -> {
-                    if (branchName == null) return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'branchName' for create."))
-                    ideService.runCommand("git branch $branchName", 15)
-                }
-                "delete" -> {
-                    if (branchName == null) return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'branchName' for delete."))
-                    ideService.runCommand("git branch -d $branchName", 15)
-                }
-                else -> ideService.runCommand("git branch", 15)
+            if (action != "list" && branchName.isNullOrBlank()) {
+                return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'branchName' for $action."))
             }
-            listOf(UIMessagePart.Text(buildString {
-                if (result.output.isNotBlank()) appendLine(result.output)
-                if (result.error.isNotBlank()) appendLine("STDERR: ${result.error}")
-            }.trimEnd().ifEmpty { "OK (no output)" }))
+            val result = ideService.gitBranch(workspace, action, branchName)
+            listOf(UIMessagePart.Text(result.ifEmpty { "OK" }))
         },
     )
 
@@ -212,6 +201,7 @@ class VibeCodingGitTools(private val ideService: IdeService) {
                     putJsonObject("remote") { put("type", "string"); put("description", "Remote name (default: origin)") }
                     putJsonObject("branch") { put("type", "string"); put("description", "Branch to push (default: current branch)") }
                     putJsonObject("setUpstream") { put("type", "boolean"); put("description", "Set upstream tracking with -u flag (use for new branches)") }
+                    putJsonObject("force") { put("type", "boolean"); put("description", "Force push (use with caution)") }
                     putJsonObject("workspacePath") { put("type", "string"); put("description", "Path to the git repository (optional)") }
                 },
                 required = emptyList<String>(),
@@ -222,51 +212,10 @@ class VibeCodingGitTools(private val ideService: IdeService) {
             val remote = obj["remote"]?.asJsonPrimitive?.asString ?: "origin"
             val branch = obj["branch"]?.asJsonPrimitive?.asString
             val setUpstream = obj["setUpstream"]?.asJsonPrimitive?.asBoolean ?: false
+            val force = obj["force"]?.asJsonPrimitive?.asBoolean ?: false
             val workspace = args.workspaceOrPrimary()
-            val branchFlag = if (branch != null) branch else ""
-            val upstreamFlag = if (setUpstream && branch != null) "-u" else ""
-            val result = ideService.runCommand("git push $upstreamFlag $remote $branchFlag".trimEnd(), 60)
-            listOf(UIMessagePart.Text(buildString {
-                if (result.output.isNotBlank()) appendLine("STDOUT:\n${result.output}")
-                if (result.error.isNotBlank()) appendLine("STDERR:\n${result.error}")
-                append("Exit: ${result.exitCode}${if (result.timedOut) " (TIMED OUT)" else ""}")
-            }.trimEnd()))
-        },
-    )
-
-    private val createPullRequest = Tool(
-        name = "createPullRequest",
-        description = "Create a GitHub Pull Request using gh CLI. Requires 'gh' installed + authenticated. " +
-            "Push the branch first with gitPush, then create the PR. " +
-            "Example: {\"title\": \"feat: add user authentication\"}",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("title") { put("type", "string"); put("description", "PR title") }
-                    putJsonObject("body") { put("type", "string"); put("description", "PR description/body (optional)") }
-                    putJsonObject("base") { put("type", "string"); put("description", "Base/target branch (default: main)") }
-                    putJsonObject("head") { put("type", "string"); put("description", "Head/source branch (default: current branch)") }
-                    putJsonObject("workspacePath") { put("type", "string"); put("description", "Path to the git repository (optional)") }
-                },
-                required = listOf("title"),
-            )
-        },
-        execute = { args ->
-            val obj = args.asJsonObject
-            val title = obj["title"]?.asJsonPrimitive?.asString
-                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'title'."))
-            val body = obj["body"]?.asJsonPrimitive?.asString?.replace("\"", "\\\"") ?: ""
-            val base = obj["base"]?.asJsonPrimitive?.asString ?: "main"
-            val head = obj["head"]?.asJsonPrimitive?.asString ?: ""
-            val workspace = args.workspaceOrPrimary()
-            val headFlag = if (head.isNotBlank()) " --head $head" else ""
-            val bodyFlag = if (body.isNotBlank()) " --body \"$body\"" else ""
-            val result = ideService.runCommand("gh pr create --title \"$title\"$bodyFlag --base $base$headFlag", 30)
-            listOf(UIMessagePart.Text(buildString {
-                if (result.output.isNotBlank()) appendLine(result.output)
-                if (result.error.isNotBlank()) appendLine("STDERR: ${result.error}")
-                if (result.timedOut) appendLine("(timed out — PR may still have been created)")
-            }.trimEnd()))
+            val result = ideService.gitPush(workspace, remote, branch, setUpstream, force)
+            listOf(UIMessagePart.Text(result))
         },
     )
 
@@ -290,18 +239,13 @@ class VibeCodingGitTools(private val ideService: IdeService) {
             val remote = obj["remote"]?.asJsonPrimitive?.asString ?: "origin"
             val branch = obj["branch"]?.asJsonPrimitive?.asString
             val workspace = args.workspaceOrPrimary()
-            val branchFlag = if (branch != null) branch else ""
-            val result = ideService.runCommand("git pull $remote $branchFlag".trimEnd(), 30)
-            listOf(UIMessagePart.Text(buildString {
-                if (result.output.isNotBlank()) appendLine("STDOUT:\n${result.output}")
-                if (result.error.isNotBlank()) appendLine("STDERR:\n${result.error}")
-                append("Exit: ${result.exitCode}${if (result.timedOut) " (TIMED OUT)" else ""}")
-            }.trimEnd()))
+            val result = ideService.gitPull(workspace, remote, branch)
+            listOf(UIMessagePart.Text(result))
         },
     )
 
     val all: List<Tool> = listOf(
         getGitStatus, getGitDiff, gitCommit, gitCheckout, gitPull,
-        gitLog, gitBranch, gitPush, createPullRequest,
+        gitLog, gitBranch, gitPush,
     )
 }

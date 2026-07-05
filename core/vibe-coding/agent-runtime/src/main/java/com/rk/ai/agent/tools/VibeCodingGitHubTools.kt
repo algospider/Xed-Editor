@@ -13,6 +13,7 @@ import com.rk.ai.models.InputSchema
 import com.rk.ai.models.Tool
 import com.rk.ai.models.UIMessagePart
 import com.rk.ai.service.IdeService
+import com.rk.settings.Settings
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -218,5 +219,89 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
         },
     )
 
-    val all: List<Tool> = listOf(githubRepoInfo, githubReadme, githubFileFetch, githubSearchCode)
+    private fun githubApiPost(urlStr: String, body: String): String {
+        val conn = URI(urlStr).toURL().openConnection() as HttpURLConnection
+        return try {
+            conn.doOutput = true
+            conn.connectTimeout = GITHUB_API_TIMEOUT_MS
+            conn.readTimeout = GITHUB_API_TIMEOUT_MS
+            conn.setRequestProperty("User-Agent", "Xed-Editor/2.0")
+            conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+            conn.setRequestProperty("Content-Type", "application/json")
+            val pw = Settings.git_password.ifBlank { null }
+            val un = Settings.git_username.ifBlank { null }
+            if (pw != null && un != null) {
+                val basic = java.util.Base64.getEncoder().encodeToString("$un:$pw".toByteArray())
+                conn.setRequestProperty("Authorization", "Basic $basic")
+            } else if (pw != null) {
+                conn.setRequestProperty("Authorization", "Bearer $pw")
+            }
+            conn.outputStream.use { it.write(body.toByteArray()) }
+            val responseCode = conn.responseCode
+            if (responseCode == 403) {
+                val resetTime = conn.getHeaderField("X-RateLimit-Reset")?.toLongOrNull()
+                throw RuntimeException("API rate limited${if (resetTime != null) ", resets ${(resetTime * 1000 - System.currentTimeMillis()) / 1000}s" else ""}")
+            }
+            val stream = if (responseCode in 200..299) conn.inputStream else conn.errorStream
+            val text = stream.bufferedReader().use { it.readText() }
+            if (responseCode !in 200..299) throw RuntimeException("HTTP $responseCode: $text")
+            text
+        } finally {
+            runCatching { conn.errorStream?.use { it.readBytes() } }
+            runCatching { conn.inputStream?.use { it.readBytes() } }
+            conn.disconnect()
+        }
+    }
+
+    private val createPullRequest = Tool(
+        name = "createPullRequest",
+        description = "Create a GitHub Pull Request via the GitHub API. " +
+            "Push the branch first with gitPush, then create the PR. " +
+            "Uses git username/password from settings for auth. " +
+            "Example: {\"repo\": \"owner/repo\", \"title\": \"feat: add user authentication\"}",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    putJsonObject("repo") { put("type", "string"); put("description", "Repository in format 'owner/repo' (e.g. 'torvalds/linux')") }
+                    putJsonObject("title") { put("type", "string"); put("description", "PR title") }
+                    putJsonObject("body") { put("type", "string"); put("description", "PR description/body (optional)") }
+                    putJsonObject("base") { put("type", "string"); put("description", "Base/target branch (default: main)") }
+                    putJsonObject("head") { put("type", "string"); put("description", "Head/source branch (default: current branch)") }
+                },
+                required = listOf("repo", "title"),
+            )
+        },
+        execute = { args ->
+            val obj = args.asJsonObject
+            val repo = obj["repo"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'repo'. Format: owner/repo"))
+            val title = obj["title"]?.asJsonPrimitive?.asString
+                ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'title'."))
+            validateRepo(repo)?.let { return@Tool listOf(it) }
+            val body = obj["body"]?.asJsonPrimitive?.asString ?: ""
+            val base = obj["base"]?.asJsonPrimitive?.asString ?: "main"
+            val head = obj["head"]?.asJsonPrimitive?.asString ?: ""
+
+            if (head.isBlank()) {
+                return@Tool listOf(UIMessagePart.Text("ERROR: Head branch is required. Specify 'head' or use current branch."))
+            }
+
+            try {
+                val jsonBody = buildJsonObject {
+                    put("title", title)
+                    put("head", head)
+                    put("base", base)
+                    if (body.isNotBlank()) put("body", body)
+                }.toString()
+                val response = githubApiPost("$GITHUB_API/repos/$repo/pulls", jsonBody)
+                val data = com.google.gson.JsonParser.parseString(response).asJsonObject
+                val prUrl = data.get("html_url")?.asString ?: data.get("url")?.asString ?: response
+                listOf(UIMessagePart.Text("PR created: $prUrl"))
+            } catch (e: Exception) {
+                listOf(UIMessagePart.Text("ERROR: createPullRequest failed: ${e.message}"))
+            }
+        },
+    )
+
+    val all: List<Tool> = listOf(githubRepoInfo, githubReadme, githubFileFetch, githubSearchCode, createPullRequest)
 }

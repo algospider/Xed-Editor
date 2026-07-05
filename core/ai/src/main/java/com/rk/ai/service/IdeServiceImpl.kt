@@ -84,6 +84,11 @@ class IdeServiceImpl(
     override suspend fun getGitDiff(workspacePath: String): String = gitService.getGitDiff(workspacePath)
     override suspend fun gitCommit(workspacePath: String, message: String, all: Boolean): String = gitService.gitCommit(workspacePath, message, all)
     override suspend fun gitCheckout(workspacePath: String, target: String): String = gitService.gitCheckout(workspacePath, target)
+    override suspend fun gitLog(workspacePath: String, maxCount: Int, branch: String?): String = gitService.gitLog(workspacePath, maxCount, branch)
+    override suspend fun gitBranch(workspacePath: String, action: String, branchName: String?): String = gitService.gitBranch(workspacePath, action, branchName)
+    override suspend fun gitPush(workspacePath: String, remote: String, branch: String?, setUpstream: Boolean, force: Boolean): String = gitService.gitPush(workspacePath, remote, branch, setUpstream, force)
+    override suspend fun gitPull(workspacePath: String, remote: String, branch: String?): String = gitService.gitPull(workspacePath, remote, branch)
+    override suspend fun getGitRoot(workspacePath: String): String? = gitService.getGitRoot(workspacePath)
 
     override suspend fun runCommand(command: String, timeoutSeconds: Long): CommandResult = terminalService.runCommand(command, timeoutSeconds)
     override suspend fun getTerminalOutput(lines: Int?): String = terminalService.getTerminalOutput(lines)

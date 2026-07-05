@@ -176,8 +176,6 @@ private fun ThinkingIndicator(
             AgentPhase.EXPLORING -> "Exploring"
             AgentPhase.EXECUTING -> "Working"
             AgentPhase.VERIFYING -> "Verifying"
-            AgentPhase.REVIEWING -> "Reviewing"
-            AgentPhase.TESTING -> "Testing"
             AgentPhase.COMPLETED -> "Done"
             AgentPhase.FAILED -> "Failed"
         }
@@ -187,7 +185,7 @@ private fun ThinkingIndicator(
             AgentPhase.PLANNING -> MaterialTheme.colorScheme.tertiary
             AgentPhase.ANALYZING, AgentPhase.INDEXING -> MaterialTheme.colorScheme.secondary
             AgentPhase.EXECUTING -> MaterialTheme.colorScheme.primary
-            AgentPhase.VERIFYING, AgentPhase.TESTING -> MaterialTheme.colorScheme.error
+            AgentPhase.VERIFYING -> MaterialTheme.colorScheme.error
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         }
 
