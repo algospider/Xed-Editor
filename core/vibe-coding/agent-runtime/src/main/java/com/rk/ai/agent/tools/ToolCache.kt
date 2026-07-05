@@ -65,7 +65,7 @@ class ToolCache(
         synchronized(this) {
             // Double-check after lock
             val doubleCheck = cache[makeKey(toolName, argsHash)]
-            if (doubleCheck != null) return doubleCheck
+            if (doubleCheck != null) return doubleCheck.result
         }
         return null // caller must compute and then put
     }

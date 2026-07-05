@@ -104,7 +104,7 @@ class SecurityHook(
         ),
         // NoSQL injection
         SecurityPattern(
-            Regex("\\$ne|\\$gt|\\$regex|\\$where", RegexOption.IGNORE_CASE),
+            Regex("""\$ne|\$gt|\$regex|\$where""", RegexOption.IGNORE_CASE),
             SecuritySeverity.MEDIUM,
             "Possible NoSQL injection operator in query",
             "Sanitize and validate user input before using in NoSQL queries",

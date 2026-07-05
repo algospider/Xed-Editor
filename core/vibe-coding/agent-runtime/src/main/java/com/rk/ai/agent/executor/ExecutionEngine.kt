@@ -141,6 +141,7 @@ class ExecutionEngine(
             }
 
             val execStart = System.currentTimeMillis()
+            val timeoutMs = if (toolCall.name == "runCommand") VibeCodingConstants.COMMAND_TOOL_TIMEOUT_MS else VibeCodingConstants.DEFAULT_TOOL_TIMEOUT_MS
             try {
                 val args = JsonParser.parseString(toolCall.input.ifBlank { "{}" })
 
@@ -154,8 +155,6 @@ class ExecutionEngine(
                     continue
                 }
 
-                // Apply tool-specific timeout
-                val timeoutMs = if (toolCall.name == "runCommand") COMMAND_TOOL_TIMEOUT_MS else TOOL_TIMEOUT_MS
                 val result = withTimeout(timeoutMs) {
                     toolDef.execute(args)
                 }
@@ -225,7 +224,7 @@ class ExecutionEngine(
 
         return ExecutionResult(
             taskId = task.id,
-            success = errors.size <= MAX_ERRORS,
+            success = errors.size <= VibeCodingConstants.MAX_CONSECUTIVE_ERRORS,
             message = "Completed in ${System.currentTimeMillis() - startTime}ms",
             modifiedFiles = modifiedFiles.distinct(),
             errors = errors,
