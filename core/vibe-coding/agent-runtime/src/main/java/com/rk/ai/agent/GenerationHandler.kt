@@ -560,7 +560,6 @@ class GenerationHandler(
             ))
         }
 
-        }
         } catch (e: Exception) {
             Log.e(TAG, "Unhandled error in generation loop", e)
             send(GenerationChunk.GenerationError(
