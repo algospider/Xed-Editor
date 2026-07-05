@@ -12,8 +12,8 @@ import kotlinx.serialization.json.putJsonObject
 import com.rk.ai.models.InputSchema
 import com.rk.ai.models.Tool
 import com.rk.ai.models.UIMessagePart
+import com.rk.ai.persistence.settings.SettingsStore
 import com.rk.ai.service.IdeService
-import com.rk.settings.Settings
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -23,7 +23,10 @@ private const val GITHUB_API = "https://api.github.com"
 private const val GITHUB_API_TIMEOUT_MS = 20_000
 private val REPO_FORMAT = Regex("^[\\w.-]+/[\\w.-]+\$")
 
-class VibeCodingGitHubTools(private val ideService: IdeService) {
+class VibeCodingGitHubTools(
+    private val ideService: IdeService,
+    private val settingsStore: SettingsStore,
+) {
 
     private fun validateRepo(repo: String): UIMessagePart.Text? =
         if (!repo.matches(REPO_FORMAT))
@@ -228,8 +231,9 @@ class VibeCodingGitHubTools(private val ideService: IdeService) {
             conn.setRequestProperty("User-Agent", "Xed-Editor/2.0")
             conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
             conn.setRequestProperty("Content-Type", "application/json")
-            val pw = Settings.git_password.ifBlank { null }
-            val un = Settings.git_username.ifBlank { null }
+            val s = settingsStore.settingsFlow.value
+            val pw = s.gitPassword.ifBlank { null }
+            val un = s.gitUsername.ifBlank { null }
             if (pw != null && un != null) {
                 val basic = java.util.Base64.getEncoder().encodeToString("$un:$pw".toByteArray())
                 conn.setRequestProperty("Authorization", "Basic $basic")

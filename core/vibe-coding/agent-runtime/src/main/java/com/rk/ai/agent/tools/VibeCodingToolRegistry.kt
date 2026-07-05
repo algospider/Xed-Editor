@@ -35,7 +35,7 @@ class VibeCodingToolRegistry(
     private val suggestionTools by lazy { SuggestionTools(ideService) }
     private val diffTools by lazy { VibeCodingDiffTools(ideService) }
     private val webTools by lazy { VibeCodingWebTools(ideService) }
-    private val githubTools by lazy { VibeCodingGitHubTools(ideService) }
+    private val githubTools by lazy { VibeCodingGitHubTools(ideService, settingsStore) }
     private val packageTools by lazy { VibeCodingPackageTools(ideService) }
 
     var onAgentResult: ((String, com.rk.ai.agent.agents.AgentResult) -> Unit)? = null

@@ -55,6 +55,8 @@ class SettingsStore(
         val MODE_INJECTIONS = stringPreferencesKey("mode_injections")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
         val QUICK_MESSAGES = stringPreferencesKey("quick_messages")
+    val GIT_USERNAME = stringPreferencesKey("git_username")
+    val GIT_PASSWORD = stringPreferencesKey("git_password")
     val TRANSLATE_MODE_ID = stringPreferencesKey("translate_mode_id")
     val TRANSLATE_PROMPT = stringPreferencesKey("translate_prompt")
     val TRANSLATE_THINKING_BUDGET = intPreferencesKey("translate_thinking_budget")
@@ -104,6 +106,8 @@ class SettingsStore(
                 quickMessages = preferences[QUICK_MESSAGES]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
+                gitUsername = preferences[GIT_USERNAME] ?: "",
+                gitPassword = preferences[GIT_PASSWORD] ?: "",
                 translateModeId = preferences[TRANSLATE_MODE_ID]?.let {
                     runCatching { Uuid.parse(it) }.getOrNull()
                 } ?: Uuid.random(),
@@ -186,6 +190,8 @@ class SettingsStore(
             preferences[MODE_INJECTIONS] = JsonInstant.encodeToString(settings.modeInjections)
             preferences[LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
             preferences[QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
+            preferences[GIT_USERNAME] = settings.gitUsername
+            preferences[GIT_PASSWORD] = settings.gitPassword
             preferences[TRANSLATE_MODE_ID] = settings.translateModeId.toString()
             preferences[TRANSLATE_PROMPT] = settings.translatePrompt
             preferences[TRANSLATE_THINKING_BUDGET] = settings.translateThinkingBudget
@@ -251,6 +257,8 @@ data class Settings(
     val lorebooks: List<com.rk.ai.models.Lorebook> = emptyList(),
     val quickMessages: List<com.rk.ai.models.QuickMessage> = emptyList(),
     val translateModeId: Uuid = Uuid.random(),
+    val gitUsername: String = "",
+    val gitPassword: String = "",
     val translatePrompt: String = "Translate the following text to {target_lang}:\n\n{source_text}",
     val translateThinkingBudget: Int = 0,
     val ocrModelId: Uuid = Uuid.random(),
