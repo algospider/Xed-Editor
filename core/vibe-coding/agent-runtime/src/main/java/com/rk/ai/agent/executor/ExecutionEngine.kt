@@ -2,6 +2,7 @@ package com.rk.ai.agent.executor
 
 import android.util.Log
 import com.rk.ai.agent.RecoveryEngine
+import com.rk.ai.agent.VibeCodingConstants
 import com.rk.ai.agent.context.ContextBundle
 import com.rk.ai.agent.context.ContextMemoryManager
 import com.rk.ai.agent.hooks.HookContext
@@ -26,9 +27,10 @@ import com.google.gson.JsonParser
 import com.rk.ai.service.IdeService
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 
 private const val TAG = "ExecutionEngine"
-private const val MAX_ERRORS = 0
 
 data class ExecutionResult(
     val taskId: String,
@@ -152,7 +154,11 @@ class ExecutionEngine(
                     continue
                 }
 
-                val result = toolDef.execute(args)
+                // Apply tool-specific timeout
+                val timeoutMs = if (toolCall.name == "runCommand") COMMAND_TOOL_TIMEOUT_MS else TOOL_TIMEOUT_MS
+                val result = withTimeout(timeoutMs) {
+                    toolDef.execute(args)
+                }
                 val duration = System.currentTimeMillis() - execStart
 
                 toolRouter.recordExecution(toolCall.name, toolCall.input, duration, true, false)
@@ -190,6 +196,13 @@ class ExecutionEngine(
                         }
                     }
                 }
+            } catch (e: TimeoutCancellationException) {
+                val duration = System.currentTimeMillis() - execStart
+                val errMsg = "${toolCall.name} timed out after ${timeoutMs}ms"
+                contextMemory.log(errMsg)
+                toolRouter.recordExecution(toolCall.name, toolCall.input, duration, false, false)
+                errors.add(errMsg)
+                Log.w(TAG, errMsg)
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - execStart
                 toolRouter.recordExecution(toolCall.name, toolCall.input, duration, false, false)

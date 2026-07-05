@@ -1,6 +1,7 @@
 @file:OptIn(ExperimentalUuidApi::class)
 package com.rk.ai.models
 
+import android.util.Log
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDateTime
@@ -130,7 +131,7 @@ data class UIMessage(
                     }
 
                     else -> {
-                        println("delta part append not supported: $deltaPart")
+                        android.util.Log.w("UIMessage", "delta part append not supported: $deltaPart")
                         acc
                     }
                 }

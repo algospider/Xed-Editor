@@ -37,7 +37,7 @@ class SecurityHook(
             "Use safe DOM APIs like textContent",
         ),
         SecurityPattern(
-            Regex("(password|secret|api[_-]?key|credential)\\s*[:=]\\s*['\"][^'\"]{4,}['\"]", RegexOption.IGNORE_CASE),
+            Regex("(password|secret|api[_-]?key|credential|auth_token|access_token|bearer)\\s*[:=]\\s*['\"][^'\"]{4,}['\"]", RegexOption.IGNORE_CASE),
             SecuritySeverity.CRITICAL,
             "Hardcoded credential detected",
             "Use environment variables or a secret manager",
@@ -65,6 +65,77 @@ class SecurityHook(
             SecuritySeverity.MEDIUM,
             "Path traversal detected in file path argument",
             "Verify the resolved path is within allowed boundaries",
+        ),
+        // --- NEW PATTERNS ---
+        // Server-Side Template Injection (SSTI)
+        SecurityPattern(
+            Regex("\\{\\{.*\\..*\\}\\}|<%.*%>|\\$\\{.*\\}", RegexOption.IGNORE_CASE),
+            SecuritySeverity.HIGH,
+            "Possible Server-Side Template Injection (SSTI)",
+            "Avoid embedding user input directly in template strings",
+        ),
+        // SSRF via URL construction
+        SecurityPattern(
+            Regex("(url|uri|endpoint|webhook)\\s*[:=]\\s*['\"](https?://)?0\\.0\\.0\\.0|['\"]localhost['\"]|['\"]127\\.0\\.0\\.1['\"]|['\"]169\\.254\\.169\\.254['\"]", RegexOption.IGNORE_CASE),
+            SecuritySeverity.HIGH,
+            "Possible SSRF - request to internal address",
+            "Validate and restrict URLs to prevent Server-Side Request Forgery",
+        ),
+        // Command injection via shell metacharacters
+        SecurityPattern(
+            Regex("['\"];\\s*(rm|cat|curl|wget|bash|sh|python|perl)\\b", RegexOption.IGNORE_CASE),
+            SecuritySeverity.CRITICAL,
+            "Command injection via shell metacharacter",
+            "Avoid shelling out with unsanitized input; use safe APIs",
+        ),
+        // LDAP injection
+        SecurityPattern(
+            Regex("(ldap|ldaps?)://.*\\b(\\*|\\|\\(|&\\))", RegexOption.IGNORE_CASE),
+            SecuritySeverity.HIGH,
+            "Possible LDAP injection in query",
+            "Use parameterized LDAP queries or escape special characters",
+        ),
+        // XML External Entity (XXE)
+        SecurityPattern(
+            Regex("<!DOCTYPE\\s+|<!ENTITY\\s+", RegexOption.IGNORE_CASE),
+            SecuritySeverity.HIGH,
+            "Possible XXE (XML External Entity) injection",
+            "Disable DTD processing and external entity resolution in XML parsers",
+        ),
+        // NoSQL injection
+        SecurityPattern(
+            Regex("\\$ne|\\$gt|\\$regex|\\$where", RegexOption.IGNORE_CASE),
+            SecuritySeverity.MEDIUM,
+            "Possible NoSQL injection operator in query",
+            "Sanitize and validate user input before using in NoSQL queries",
+        ),
+        // Insecure Random / Predictable PRNG
+        SecurityPattern(
+            Regex("Math\\.random\\(\\).*password|Math\\.random\\(\\).*token|Math\\.random\\(\\).*secret", RegexOption.IGNORE_CASE),
+            SecuritySeverity.MEDIUM,
+            "Insecure random number generator used for security-sensitive value",
+            "Use SecureRandom or a CSPRNG for tokens/secrets",
+        ),
+        // Log Injection / Log Forging
+        SecurityPattern(
+            Regex("log\\.(info|warn|error|debug)\\(.*\\+.*(user|input|param|request)", RegexOption.IGNORE_CASE),
+            SecuritySeverity.LOW,
+            "Possible log injection - concatenating user input into log message",
+            "Use parameterized logging to prevent log forging",
+        ),
+        // Prototype Pollution (JS/TS)
+        SecurityPattern(
+            Regex("__proto__|prototype\\s*\\[|constructor\\s*\\.\\s*prototype", RegexOption.IGNORE_CASE),
+            SecuritySeverity.HIGH,
+            "Possible prototype pollution attack pattern",
+            "Avoid merging untrusted objects; use Object.create(null) or Map",
+        ),
+        // Open Redirect
+        SecurityPattern(
+            Regex("(redirect|forward|next|returnTo|callback)\\s*[:=]\\s*['\"](https?://)?[^'\"]*['\"]", RegexOption.IGNORE_CASE),
+            SecuritySeverity.MEDIUM,
+            "Possible open redirect - URL redirect controlled by input",
+            "Validate redirect URLs against an allowlist",
         ),
     )
 

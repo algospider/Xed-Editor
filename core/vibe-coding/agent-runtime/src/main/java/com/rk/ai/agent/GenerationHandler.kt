@@ -131,6 +131,7 @@ class GenerationHandler(
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
     ): Flow<GenerationChunk> = channelFlow {
+        try {
         // Per-call state — reset for each generateText() invocation to prevent bleed between sessions
         var compactionCount = 0
         var previousToolCalls: List<Pair<String, String>> = emptyList()
@@ -140,7 +141,14 @@ class GenerationHandler(
         val PATTERN_WINDOW = 6 // detect patterns across this many steps
         val PATTERN_REPEAT_THRESHOLD = 2 // break if pattern repeats this many times
 
-        val provider = model.findProvider(settings.providers) ?: error("Provider not found")
+        val provider = model.findProvider(settings.providers)
+        if (provider == null) {
+            send(GenerationChunk.GenerationError(
+                errorMessage = "Provider not found for model ${model.id}. Check provider configuration.",
+                errorType = "ProviderNotFound",
+            ))
+            return@channelFlow
+        }
         val providerImpl = providerManager.getProviderByType(provider)
 
         var messages: List<UIMessage> = messages
@@ -552,6 +560,14 @@ class GenerationHandler(
             ))
         }
 
+        }
+        } catch (e: Exception) {
+            Log.e(TAG, "Unhandled error in generation loop", e)
+            send(GenerationChunk.GenerationError(
+                errorMessage = e.message ?: "Unknown error in generation loop",
+                errorType = e::class.simpleName ?: "UnknownError",
+            ))
+        }
     }.flowOn(Dispatchers.IO)
 
     private suspend fun compactMessages(
@@ -590,11 +606,11 @@ class GenerationHandler(
     ): UIMessagePart.Tool {
         return try {
             val toolDef = toolsInternal.find { it.name == tool.toolName }
-                ?: error("Tool ${tool.toolName} not found")
+                ?: throw IllegalArgumentException("Tool '${tool.toolName}' not found in available tools. Available: ${toolsInternal.map { it.name }}")
             val args = try {
                 com.google.gson.JsonParser.parseString(tool.input.ifBlank { "{}" })
             } catch (e: Exception) {
-                error("Invalid tool arguments JSON for ${tool.toolName}: ${e.message}")
+                throw IllegalArgumentException("Invalid JSON arguments for tool '${tool.toolName}': ${e.message}")
             }
             Log.i(TAG, "executeSingleTool: ${toolDef.name} args: $args")
             val result = toolDef.execute(args)
@@ -887,9 +903,15 @@ class GenerationHandler(
         onStreamUpdate: ((String) -> Unit)? = null
     ): Flow<String> = flow {
         val model = settings.providers.findModelById(settings.translateModeId)
-            ?: error("Translation model not found")
+        if (model == null) {
+            Log.w(TAG, "translateText: model not found for id=${settings.translateModeId}")
+            return@flow
+        }
         val provider = model.findProvider(settings.providers)
-            ?: error("Translation provider not found")
+        if (provider == null) {
+            Log.w(TAG, "translateText: provider not found for model=${model.id}")
+            return@flow
+        }
 
         val providerHandler = providerManager.getProviderByType(provider)
 

@@ -50,6 +50,26 @@ class ToolCache(
         return entry.result
     }
 
+    /**
+     * Thread-safe get that acquires the entry mutex to prevent
+     * concurrent duplicate executions of the same tool+args.
+     */
+    fun getOrCompute(
+        toolName: String,
+        argsHash: String,
+        compute: suspend () -> List<UIMessagePart>,
+    ): List<UIMessagePart>? {
+        if (!isCacheable(toolName)) return null
+        val existing = get(toolName, argsHash)
+        if (existing != null) return existing
+        synchronized(this) {
+            // Double-check after lock
+            val doubleCheck = cache[makeKey(toolName, argsHash)]
+            if (doubleCheck != null) return doubleCheck
+        }
+        return null // caller must compute and then put
+    }
+
     fun put(toolName: String, argsHash: String, result: List<UIMessagePart>) {
         if (!isCacheable(toolName)) return
         val key = makeKey(toolName, argsHash)

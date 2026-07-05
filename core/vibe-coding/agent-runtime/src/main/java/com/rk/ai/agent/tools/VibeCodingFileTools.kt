@@ -80,6 +80,49 @@ class VibeCodingFileTools(
             val hint = deriveRecoveryHint(toolName, error)
             return if (hint != null) "[RECOVERY] $error. ${hint.message}" else null
         }
+
+        /**
+         * Creates a minimal unified-diff-like preview string for human review.
+         * Shows context lines around changes in a compact format.
+         */
+        fun createUnifiedDiff(fileName: String, oldContent: String, newContent: String): String {
+            val oldLines = oldContent.lines()
+            val newLines = newContent.lines()
+            val diff = StringBuilder()
+            diff.appendLine("--- a/$fileName")
+            diff.appendLine("+++ b/$fileName")
+
+            val CONTEXT_LINES = 2
+            var idx = 0
+            while (idx < oldLines.size || idx < newLines.size) {
+                if (idx < oldLines.size && idx < newLines.size && oldLines[idx] == newLines[idx]) {
+                    idx++
+                    continue
+                }
+                // Found a change — collect the hunk
+                val startOld = (idx - CONTEXT_LINES).coerceAtLeast(0)
+                val startNew = (idx - CONTEXT_LINES).coerceAtLeast(0)
+                var endOld = (idx + CONTEXT_LINES).coerceAtMost(oldLines.size)
+                var endNew = (idx + CONTEXT_LINES).coerceAtMost(newLines.size)
+
+                // Extend to include all contiguous changed lines
+                while (endOld < oldLines.size || endNew < newLines.size) {
+                    if (endOld < oldLines.size && endNew < newLines.size && oldLines[endOld] == newLines[endNew]) break
+                    if (endOld < oldLines.size) endOld++
+                    if (endNew < newLines.size) endNew++
+                }
+
+                diff.appendLine("@@ -${startOld + 1},${endOld - startOld} +${startNew + 1},${endNew - startNew} @@")
+                for (i in startOld until endOld) {
+                    if (i < oldLines.size) diff.appendLine("-${oldLines[i]}") else diff.appendLine("-")
+                }
+                for (i in startNew until endNew) {
+                    if (i < newLines.size) diff.appendLine("+${newLines[i]}") else diff.appendLine("+")
+                }
+                idx = maxOf(endOld, endNew)
+            }
+            return diff.toString().ifEmpty { "(no changes)" }
+        }
     }
 
     private val readFile = Tool(
@@ -167,12 +210,14 @@ class VibeCodingFileTools(
             "Use for creating new files or full rewrites. " +
             "For targeted edits, prefer editFile (surgical find-and-replace) to minimize context and potential errors. " +
             "For multiple files, prefer applyBatchEdits. " +
+            "When overwriting an existing file, set showDiff=true to display a diff preview first. " +
             "Example: {\"filePath\": \"src/main.kt\", \"content\": \"fun main() {}\"}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("filePath") { put("type", "string"); put("description", "Absolute path to the file to write") }
                     putJsonObject("content") { put("type", "string"); put("description", "The full content to write. Overwrites existing content entirely.") }
+                    putJsonObject("showDiff") { put("type", "boolean"); put("description", "If true, shows a diff preview before overwriting an existing file (default: false)") }
                 },
                 required = listOf("filePath", "content"),
             )
@@ -183,13 +228,22 @@ class VibeCodingFileTools(
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath' or 'path' argument.\nEXPECTED: {\"filePath\": \"src/main.kt\", \"content\": \"...\"}"))
             val content = obj["content"]?.asJsonPrimitive?.asString
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'content' argument.\nEXPECTED: {\"filePath\": \"src/main.kt\", \"content\": \"...\"}"))
+            val showDiff = obj["showDiff"]?.asJsonPrimitive?.asBoolean ?: false
             val file = ideService.resolvePath(path)
             if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(path, ideService.getPrimaryWorkspacePath())))
             try {
                 file.parentFile?.mkdirs()
-                ideService.writeFile(file, content)
-                fileContentCache.invalidate(file.absolutePath)
-                listOf(UIMessagePart.Text("OK ${file.absolutePath} (${content.length} bytes)"))
+                // Show diff preview before overwriting an existing file
+                if (showDiff && file.exists()) {
+                    val oldContent = file.readText()
+                    val patch = createUnifiedDiff(file.name, oldContent, content)
+                    ideService.showPatch(file.absolutePath, oldContent, content, "writeFile: ${file.name}") { }
+                    listOf(UIMessagePart.Text("Diff shown for $path. Use getDiffResult after user review.\nPreview:\n$patch"))
+                } else {
+                    ideService.writeFile(file, content)
+                    fileContentCache.invalidate(file.absolutePath)
+                    listOf(UIMessagePart.Text("OK ${file.absolutePath} (${content.length} bytes)"))
+                }
             } catch (e: Exception) {
                 val hint = buildRecoveryMsg(e.message ?: "Write failed", "writeFile")
                 listOf(UIMessagePart.Text("ERROR: Failed to write $path: ${e.message}${hint?.let { "\n$it" } ?: ""}"))

@@ -1,8 +1,14 @@
 package com.rk.ai.agent.indexer
 
+import android.util.Log
 import com.rk.ai.service.IdeService
 import com.google.gson.JsonElement
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.supervisorScope
 import java.io.File
+
+private const val TAG = "ProjectIndexer"
 
 data class ScannedFile(
     val path: String,
@@ -38,33 +44,64 @@ data class IndexResult(
 
 class ProjectIndexer(private val ideService: IdeService) {
 
-    suspend fun index(workspacePath: String): IndexResult {
-        return IndexResult(
-            files = scanFiles(workspacePath),
-            modules = scanModules(workspacePath),
-            symbols = scanSymbols(workspacePath),
-            dependencies = scanDependencies(workspacePath),
-            packageStructure = scanPackageStructure(workspacePath),
+    /**
+     * Full project index using parallel scanning for each dimension.
+     * All five scans run concurrently for maximum throughput.
+     */
+    suspend fun index(workspacePath: String): IndexResult = coroutineScope {
+        val filesDeferred = async { scanFiles(workspacePath) }
+        val modulesDeferred = async { scanModules(workspacePath) }
+        val symbolsDeferred = async {
+            // Symbol scanning depends on files, so we pass the deferred result
+            val files = filesDeferred.await()
+            scanSymbols(files)
+        }
+        val depsDeferred = async { scanDependencies(workspacePath) }
+        val pkgDeferred = async {
+            val files = filesDeferred.await()
+            scanPackageStructure(files)
+        }
+
+        IndexResult(
+            files = filesDeferred.await(),
+            modules = modulesDeferred.await(),
+            symbols = symbolsDeferred.await(),
+            dependencies = depsDeferred.await(),
+            packageStructure = pkgDeferred.await(),
         )
     }
 
-    private suspend fun scanFiles(path: String): List<ScannedFile> {
-        val extensions = listOf("kt", "java", "kts", "xml", "gradle", "properties", "json", "yml", "yaml", "toml", "cfg", "md")
-        val allFiles = mutableListOf<ScannedFile>()
-        for (ext in extensions) {
-            try {
-                val results = ideService.findFiles("**/*.$ext", 2000, path)
-                allFiles.addAll(results.mapNotNull { element ->
+    /**
+     * Parallel file scanning across all extensions at once.
+     */
+    private suspend fun scanFiles(path: String): List<ScannedFile> = supervisorScope {
+        val extensions = listOf(
+            "kt", "java", "kts", "xml", "gradle", "properties",
+            "json", "yml", "yaml", "toml", "cfg", "md"
+        )
+        val chunkSize = 6
+        val results = extensions.chunked(chunkSize).flatMap { chunk ->
+            chunk.map { ext ->
+                async {
                     try {
-                        val pathStr = element.asString
-                        val file = File(pathStr)
-                        if (file.exists()) ScannedFile(pathStr, file.lastModified(), file.length())
-                        else null
-                    } catch (_: Exception) { null }
-                })
-            } catch (_: Exception) { }
-        }
-        return allFiles.distinctBy { it.path }
+                        val results = ideService.findFiles("**/*.$ext", 2000, path)
+                        results.mapNotNull { element ->
+                            try {
+                                val pathStr = element.asString
+                                val file = File(pathStr)
+                                if (file.exists()) {
+                                    ScannedFile(pathStr, file.lastModified(), file.length())
+                                } else null
+                            } catch (_: Exception) { null }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to scan *.$ext: ${e.message}")
+                        emptyList()
+                    }
+                }
+            }
+        }.flatMap { it.await() }
+        results.distinctBy { it.path }
     }
 
     private suspend fun scanModules(path: String): List<ModuleInfo> {
@@ -83,8 +120,10 @@ class ProjectIndexer(private val ideService: IdeService) {
         return modules
     }
 
-    private suspend fun scanSymbols(path: String): List<SymbolInfo> {
-        val symbols = mutableListOf<SymbolInfo>()
+    /**
+     * Parallel symbol scanning across files using coroutines.
+     */
+    private suspend fun scanSymbols(files: List<ScannedFile>): List<SymbolInfo> = supervisorScope {
         val patterns = listOf(
             Regex("""^(class|object|interface|data class|sealed class|enum class|abstract class)\s+(\w+)""", RegexOption.MULTILINE),
             Regex("""^fun\s+(\w+)""", RegexOption.MULTILINE),
@@ -92,28 +131,39 @@ class ProjectIndexer(private val ideService: IdeService) {
             Regex("""^var\s+(\w+)\s""", RegexOption.MULTILINE),
         )
 
-        val files = scanFiles(path).take(200)
-        for (file in files) {
-            if (file.size > 500_000) continue
-            val content = try { File(file.path).readText() } catch (_: Exception) { continue }
-            for (pattern in patterns) {
-                for (match in pattern.findAll(content)) {
-                    val kind = match.groupValues[1].let { raw ->
-                        when {
-                            raw.startsWith("class") || raw.startsWith("data class") || raw.startsWith("sealed class") || raw.startsWith("abstract class") || raw.startsWith("enum class") -> "class"
-                            raw == "object" || raw == "interface" -> raw
-                            raw == "fun" -> "fun"
-                            raw == "val" || raw == "var" -> "property"
-                            else -> raw
-                        }
+        val MAX_SYMBOL_FILES = 200
+        val MAX_FILE_SIZE = 500_000L
+
+        files.take(MAX_SYMBOL_FILES)
+            .filter { it.size <= MAX_FILE_SIZE }
+            .chunked(20) // process 20 files in parallel per batch
+            .flatMap { batch ->
+                batch.map { file ->
+                    async {
+                        val symbols = mutableListOf<SymbolInfo>()
+                        try {
+                            val content = File(file.path).readText()
+                            for (pattern in patterns) {
+                                for (match in pattern.findAll(content)) {
+                                    val kind = match.groupValues[1].let { raw ->
+                                        when {
+                                            raw in listOf("class", "data class", "sealed class", "abstract class", "enum class") -> "class"
+                                            raw == "object" || raw == "interface" -> raw
+                                            raw == "fun" -> "fun"
+                                            raw == "val" || raw == "var" -> "property"
+                                            else -> raw
+                                        }
+                                    }
+                                    val name = match.groupValues[2]
+                                    val line = content.substring(0, match.range.first).count { it == '\n' } + 1
+                                    symbols.add(SymbolInfo(name, file.path, line, kind))
+                                }
+                            }
+                        } catch (_: Exception) { }
+                        symbols
                     }
-                    val name = match.groupValues[2]
-                    val line = content.substring(0, match.range.first).count { it == '\n' } + 1
-                    symbols.add(SymbolInfo(name, file.path, line, kind))
                 }
-            }
-        }
-        return symbols
+            }.flatMap { it.await() }
     }
 
     private suspend fun scanDependencies(path: String): List<DependencyInfo> {
@@ -130,17 +180,28 @@ class ProjectIndexer(private val ideService: IdeService) {
         return deps
     }
 
-    private suspend fun scanPackageStructure(path: String): Map<String, List<String>> {
-        val structure = mutableMapOf<String, MutableList<String>>()
-        val files = scanFiles(path).filter { it.path.endsWith(".kt") || it.path.endsWith(".java") }
-        for (file in files) {
-            val content = try { File(file.path).readLines().firstOrNull() ?: "" } catch (_: Exception) { continue }
-            val pkgMatch = Regex("""^package\s+([\w.]+)""").find(content)
-            if (pkgMatch != null) {
-                val pkg = pkgMatch.groupValues[1]
-                structure.getOrPut(pkg) { mutableListOf() }.add(file.path)
+    /**
+     * Parallel package-structure scanning.
+     */
+    private suspend fun scanPackageStructure(files: List<ScannedFile>): Map<String, List<String>> = supervisorScope {
+        val sourceFiles = files.filter { it.path.endsWith(".kt") || it.path.endsWith(".java") }
+        val pkgPattern = Regex("""^package\s+([\w.]+)""")
+
+        sourceFiles.chunked(30).flatMap { batch ->
+            batch.map { file ->
+                async {
+                    val result = mutableListOf<Pair<String, String>>()
+                    try {
+                        val firstLine = File(file.path).useLines { it.firstOrNull() ?: "" }
+                        val pkgMatch = pkgPattern.find(firstLine)
+                        if (pkgMatch != null) {
+                            result.add(pkgMatch.groupValues[1] to file.path)
+                        }
+                    } catch (_: Exception) { }
+                    result
+                }
             }
-        }
-        return structure
+        }.flatMap { it.await() }
+            .groupBy({ it.first }, { it.second })
     }
 }
