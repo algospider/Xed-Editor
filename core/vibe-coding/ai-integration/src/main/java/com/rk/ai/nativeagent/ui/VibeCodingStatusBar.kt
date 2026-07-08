@@ -13,7 +13,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,8 +26,8 @@ fun VibeCodingStatusBar(
     modifier: Modifier = Modifier,
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val phaseColor = Color(state.phaseColor)
-    val isActive = state.isAgentActive
+    val phaseColor = PhaseDisplay.color(state.currentPhase, colorScheme)
+    val isActive = PhaseDisplay.isActive(state.currentPhase)
 
     // Pulsing animation for active phases
     val infiniteTransition = rememberInfiniteTransition(label = "statusPulse")

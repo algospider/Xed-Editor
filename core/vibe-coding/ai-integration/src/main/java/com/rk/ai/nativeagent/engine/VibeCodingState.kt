@@ -126,31 +126,7 @@ data class VibeCodingState(
     val completedTodos: Int get() = todos.count { it.status == SessionTodoStatus.COMPLETED }
     val pendingTodos: Int get() = todos.count { it.status == SessionTodoStatus.PENDING }
 
-    val phaseLabel: String get() = when (currentPhase) {
-        AgentPhase.IDLE -> "Idle"
-        AgentPhase.PLANNING -> "Planning"
-        AgentPhase.ANALYZING -> "Analyzing"
-        AgentPhase.INDEXING -> "Indexing"
-        AgentPhase.EXPLORING -> "Exploring"
-        AgentPhase.EXECUTING -> "Executing"
-        AgentPhase.VERIFYING -> "Verifying"
-        AgentPhase.COMPLETED -> "Completed"
-        AgentPhase.FAILED -> "Failed"
-    }
-
-    val isAgentActive: Boolean get() = currentPhase !in listOf(AgentPhase.IDLE, AgentPhase.COMPLETED, AgentPhase.FAILED)
-
-    val phaseColor: Long get() = when (currentPhase) {
-        AgentPhase.IDLE -> 0xFF9E9E9E
-        AgentPhase.PLANNING -> 0xFFFFA726
-        AgentPhase.ANALYZING -> 0xFF42A5F5
-        AgentPhase.INDEXING -> 0xFF66BB6A
-        AgentPhase.EXPLORING -> 0xFF26C6DA
-        AgentPhase.EXECUTING -> 0xFFEF5350
-        AgentPhase.VERIFYING -> 0xFFAB47BC
-        AgentPhase.COMPLETED -> 0xFF66BB6A
-        AgentPhase.FAILED -> 0xFFEF5350
-    }
+    val phaseLabel: String get() = com.rk.ai.nativeagent.ui.PhaseDisplay.label(currentPhase)
 
     fun sessionLineage(sessionId: Uuid): List<Uuid> {
         val result = mutableListOf(sessionId)

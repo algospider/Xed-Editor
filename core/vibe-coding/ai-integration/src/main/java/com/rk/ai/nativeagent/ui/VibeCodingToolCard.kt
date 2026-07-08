@@ -220,7 +220,7 @@ fun VibeCodingToolCard(
                             Spacer(Modifier.width(4.dp))
                             Surface(
                                 shape = RoundedCornerShape(3.dp),
-                                color = Color(0xFF2E7D32).copy(alpha = 0.1f),
+                                color = colorScheme.primary.copy(alpha = 0.1f),
                             ) {
                                 Text(
                                     text = "+${impactBadge.first}/-${impactBadge.second}",
@@ -228,7 +228,7 @@ fun VibeCodingToolCard(
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = Color(0xFF2E7D32),
+                                    color = colorScheme.primary,
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                                 )
                             }
@@ -557,15 +557,15 @@ private fun DiffPreviewText(text: String, colorScheme: ColorScheme) {
     ) {
         text.lines().forEach { line ->
             val lineColor = when {
-                line.startsWith("+") && !line.startsWith("+++") -> Color(0xFF2E7D32).copy(alpha = 0.8f)
-                line.startsWith("-") && !line.startsWith("---") -> Color(0xFFC62828).copy(alpha = 0.8f)
-                line.startsWith("@@") -> colorScheme.primary.copy(alpha = 0.6f)
+                line.startsWith("+") && !line.startsWith("+++") -> colorScheme.primary.copy(alpha = 0.8f)
+                line.startsWith("-") && !line.startsWith("---") -> colorScheme.error.copy(alpha = 0.8f)
+                line.startsWith("@@") -> colorScheme.tertiary.copy(alpha = 0.6f)
                 line.startsWith("diff --git") || line.startsWith("index") -> colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                 else -> colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             }
             val bgColor = when {
-                line.startsWith("+") && !line.startsWith("+++") -> Color(0xFF2E7D32).copy(alpha = 0.08f)
-                line.startsWith("-") && !line.startsWith("---") -> Color(0xFFC62828).copy(alpha = 0.08f)
+                line.startsWith("+") && !line.startsWith("+++") -> colorScheme.primary.copy(alpha = 0.08f)
+                line.startsWith("-") && !line.startsWith("---") -> colorScheme.error.copy(alpha = 0.08f)
                 else -> Color.Transparent
             }
             Text(

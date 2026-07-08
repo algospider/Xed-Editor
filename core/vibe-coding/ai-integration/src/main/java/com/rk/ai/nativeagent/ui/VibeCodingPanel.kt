@@ -43,20 +43,23 @@ fun VibeCodingPanel(
     val configuration = LocalConfiguration.current
     val isTablet = configuration.screenWidthDp >= 600
 
-    // UI state
+    // ── UI state groups ──
     var showSettings by remember { mutableStateOf(false) }
-    var showClearDialog by remember { mutableStateOf(false) }
-    var showExportDialog by remember { mutableStateOf(false) }
-    var showStopConfirmDialog by remember { mutableStateOf(false) }
+    var selectedInfoTab by remember { mutableStateOf<InfoTab?>(null) }
+    var activePanel by remember { mutableStateOf(ToolPanel.NONE) }
+
+    // Sidebars
     var showHistory by remember { mutableStateOf(false) }
     var showFiles by remember { mutableStateOf(false) }
     var showSuggestions by remember { mutableStateOf(false) }
-    var selectedInfoTab by remember { mutableStateOf<InfoTab?>(null) }
     var showAgentActivity by remember { mutableStateOf(false) }
-    var activePanel by remember { mutableStateOf(ToolPanel.NONE) }
-    var showUndoSnackbar by remember { mutableStateOf(false) }
-    var sessionToRename by remember { mutableStateOf<kotlin.uuid.Uuid?>(null) }
+
+    // Dialogs
+    var showClearDialog by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    var showStopConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var sessionToRename by remember { mutableStateOf<kotlin.uuid.Uuid?>(null) }
     var conversationToDelete by remember { mutableStateOf<com.rk.ai.models.Conversation?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val snackbarHostState = remember { SnackbarHostState() }
@@ -421,7 +424,6 @@ fun VibeCodingPanel(
     // ── Undo snackbar ──
     LaunchedEffect(state.recentlyDeletedMessage) {
         if (state.recentlyDeletedMessage != null) {
-            showUndoSnackbar = true
             val result = snackbarHostState.showSnackbar(
                 message = "Message deleted",
                 actionLabel = "Undo",
@@ -430,7 +432,6 @@ fun VibeCodingPanel(
             if (result == SnackbarResult.ActionPerformed) {
                 engine.undoDeleteMessage()
             }
-            showUndoSnackbar = false
         }
     }
 

@@ -664,10 +664,7 @@ class GenerationHandler(
             }
             val executionState = ExecutionState.Completed(title = toolDef.name)
 
-            mutex?.withLock {
-                contextMemory?.log("Tool executed: ${tool.toolName} — success")
-                contextMemory?.recordEdit(tool.toolName, "executed")
-            } ?: run {
+            withMemoryLogging(mutex) {
                 contextMemory?.log("Tool executed: ${tool.toolName} — success")
                 contextMemory?.recordEdit(tool.toolName, "executed")
             }
@@ -701,12 +698,7 @@ class GenerationHandler(
                     if (review.securityChecks.isNotEmpty()) append(" | Security: ${review.securityChecks.first().take(80)}")
                     if (review.qualityFlags.isNotEmpty()) append(" | Quality: ${review.qualityFlags.first().take(80)}")
                 }
-                mutex?.withLock {
-                    contextMemory?.log("Self-review: ${tool.toolName} — $logMsg")
-                    if (review.securityChecks.isNotEmpty()) {
-                        contextMemory?.addFact("Security concern in ${tool.toolName}: ${review.securityChecks.first().take(100)}")
-                    }
-                } ?: run {
+                withMemoryLogging(mutex) {
                     contextMemory?.log("Self-review: ${tool.toolName} — $logMsg")
                     if (review.securityChecks.isNotEmpty()) {
                         contextMemory?.addFact("Security concern in ${tool.toolName}: ${review.securityChecks.first().take(100)}")
@@ -720,9 +712,7 @@ class GenerationHandler(
             )
         } catch (e: Exception) {
             Log.w(TAG, "executeSingleTool failed: ${tool.toolName}", e)
-            mutex?.withLock {
-                contextMemory?.log("Tool failed: ${tool.toolName} — ${e.message?.take(100)}")
-            } ?: run {
+            withMemoryLogging(mutex) {
                 contextMemory?.log("Tool failed: ${tool.toolName} — ${e.message?.take(100)}")
             }
             tool.copy(
@@ -730,6 +720,11 @@ class GenerationHandler(
                 output = listOf(UIMessagePart.Text("Error: ${e.message}"))
             )
         }
+    }
+
+    /** Execute [action] under [mutex] if provided, or directly otherwise. */
+    private suspend fun withMemoryLogging(mutex: kotlinx.coroutines.sync.Mutex?, action: suspend () -> Unit) {
+        if (mutex != null) mutex.withLock { action() } else action()
     }
 
     private fun extractFilePath(input: String): String? {

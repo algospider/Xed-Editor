@@ -167,27 +167,9 @@ private fun ThinkingIndicator(
         label = "dotsAlpha",
     )
 
-    val phaseLabel =
-        when (phase) {
-            AgentPhase.IDLE -> "Thinking"
-            AgentPhase.PLANNING -> "Planning"
-            AgentPhase.ANALYZING -> "Analyzing"
-            AgentPhase.INDEXING -> "Indexing"
-            AgentPhase.EXPLORING -> "Exploring"
-            AgentPhase.EXECUTING -> "Working"
-            AgentPhase.VERIFYING -> "Verifying"
-            AgentPhase.COMPLETED -> "Done"
-            AgentPhase.FAILED -> "Failed"
-        }
+    val phaseLabel = PhaseDisplay.label(phase)
 
-    val phaseColor =
-        when (phase) {
-            AgentPhase.PLANNING -> MaterialTheme.colorScheme.tertiary
-            AgentPhase.ANALYZING, AgentPhase.INDEXING -> MaterialTheme.colorScheme.secondary
-            AgentPhase.EXECUTING -> MaterialTheme.colorScheme.primary
-            AgentPhase.VERIFYING -> MaterialTheme.colorScheme.error
-            else -> MaterialTheme.colorScheme.onSurfaceVariant
-        }
+    val phaseColor = PhaseDisplay.color(phase, MaterialTheme.colorScheme)
 
     Surface(
         modifier = modifier,

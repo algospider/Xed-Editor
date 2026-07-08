@@ -54,14 +54,6 @@ private val slashCommands =
         SlashCommand("plan", "Plan", "Create execution plan", Icons.Outlined.AccountTree, "Create a step-by-step plan for a complex task"),
     )
 
-private val quickActions =
-    listOf(
-        SlashCommand("fix", "Fix Bugs", "Find and fix issues", Icons.Outlined.BugReport, "Find and fix issues in the current code"),
-        SlashCommand("test", "Add Tests", "Write test cases", Icons.Outlined.Science, "Write tests for the codebase"),
-        SlashCommand("refactor", "Refactor", "Improve code quality", Icons.Outlined.Refresh, "Refactor the codebase"),
-        SlashCommand("doc", "Document", "Generate documentation", Icons.Outlined.Description, "Add documentation to the code"),
-    )
-
 @Composable
 fun VibeCodingInput(
     isProcessing: Boolean,
@@ -153,7 +145,7 @@ fun VibeCodingInput(
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    items(quickActions) { action ->
+                    items(slashCommands.take(4)) { action ->
                         SuggestionChip(
                             onClick = { executeSlashCommand(action) },
                             label = {
