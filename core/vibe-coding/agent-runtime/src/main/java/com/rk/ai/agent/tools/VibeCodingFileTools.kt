@@ -289,6 +289,15 @@ class VibeCodingFileTools(
 
             val matchCount = countMatches(content, oldString)
             if (matchCount == 0) {
+                // Fuzzy fallback: try whitespace-normalized matching
+                val fuzzyResult = fuzzyFindAndReplace(content, oldString, newString, replaceAll)
+                if (fuzzyResult != null) {
+                    ideService.writeFile(file, fuzzyResult.first)
+                    fileContentCache.invalidate(resolvedPath)
+                    return@Tool listOf(UIMessagePart.Text(
+                        "OK $resolvedPath (fuzzy match: ${fuzzyResult.second})${ if (replaceAll) " (replaced all)" else "" }"
+                    ))
+                }
                 val contextHint = oldString.lines().let { lines ->
                     if (lines.size >= 3) "\nTRY: Include the line BEFORE and AFTER your target text to make the match unique."
                     else "\nTRY: Read the file first to see exact content. Whitespace (spaces vs tabs) must match exactly."
@@ -724,6 +733,56 @@ class VibeCodingFileTools(
             }.toString()))
         },
     )
+
+    private fun fuzzyFindAndReplace(
+        content: String,
+        oldString: String,
+        newString: String,
+        replaceAll: Boolean,
+    ): Pair<String, String>? {
+        // Strategy 1: normalize whitespace (spaces/tabs, trailing whitespace)
+        val normalizeWs = { s: String -> s.lines().joinToString("\n") { it.trimEnd().replace("\t", "    ") } }
+        val normalizedContent = normalizeWs(content)
+        val normalizedOld = normalizeWs(oldString)
+        if (normalizedContent.contains(normalizedOld)) {
+            val contentLines = content.lines()
+            val normContentLines = normalizedContent.lines()
+            val normOldLines = normalizedOld.lines()
+
+            val startIdx = normContentLines.windowed(normOldLines.size).indexOfFirst { window ->
+                window.zip(normOldLines).all { (a, b) -> a == b }
+            }
+            if (startIdx >= 0) {
+                val originalMatch = contentLines.subList(startIdx, startIdx + normOldLines.size).joinToString("\n")
+                val result = if (replaceAll) content.replace(originalMatch, newString) else content.replaceFirst(originalMatch, newString)
+                return result to "whitespace-normalized"
+            }
+        }
+
+        // Strategy 2: trimmed line-by-line matching (ignores leading/trailing whitespace per line)
+        val contentLines = content.lines()
+        val oldLines = oldString.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        if (oldLines.size >= 2) {
+            for (i in 0..contentLines.size - oldLines.size) {
+                val window = contentLines.subList(i, i + oldLines.size)
+                if (window.map { it.trim() }.zip(oldLines).all { (a, b) -> a == b }) {
+                    val originalMatch = window.joinToString("\n")
+                    // Preserve indentation: detect common indent from original
+                    val indent = window.first().takeWhile { it.isWhitespace() }
+                    val indentedNew = newString.lines().mapIndexed { idx, line ->
+                        if (idx == 0) indent + line.trimStart() else {
+                            val oldIndent = if (idx < oldLines.size) window[idx].takeWhile { it.isWhitespace() } else indent
+                            oldIndent + line.trimStart()
+                        }
+                    }.joinToString("\n")
+                    val result = content.replaceFirst(originalMatch, indentedNew)
+                    return result to "trimmed-line match, indent preserved"
+                }
+            }
+        }
+
+        return null
+    }
 
     val all: List<Tool> = listOf(
         readFile, readFiles, readAndEdit, writeFile, editFile, multiEditFile, applyBatchEdits,

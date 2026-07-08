@@ -47,8 +47,33 @@ class ConversationMemory {
     }
 
     fun getRelevantFacts(query: String): List<String> {
-        val queryLower = query.lowercase()
-        return extractedFacts.filter { it.lowercase().contains(queryLower) }
+        if (query.isBlank()) return extractedFacts.takeLast(10)
+        val queryTokens = tokenize(query)
+        if (queryTokens.isEmpty()) return extractedFacts.takeLast(10)
+
+        return extractedFacts
+            .map { fact -> fact to scoreRelevance(queryTokens, fact) }
+            .filter { it.second > 0.0 }
+            .sortedByDescending { it.second }
+            .take(15)
+            .map { it.first }
+    }
+
+    private fun tokenize(text: String): Set<String> {
+        return text.lowercase()
+            .split(Regex("[\\s,._\\-/(){}\\[\\]<>:;\"']+"))
+            .filter { it.length >= 2 }
+            .toSet()
+    }
+
+    private fun scoreRelevance(queryTokens: Set<String>, fact: String): Double {
+        val factTokens = tokenize(fact)
+        if (factTokens.isEmpty()) return 0.0
+        val matches = queryTokens.count { qt -> factTokens.any { ft -> ft.contains(qt) || qt.contains(ft) } }
+        if (matches == 0) return 0.0
+        val coverage = matches.toDouble() / queryTokens.size
+        val recency = 1.0 + (extractedFacts.indexOf(fact).toDouble() / extractedFacts.size.coerceAtLeast(1)) * 0.5
+        return coverage * recency
     }
 
     fun clear() {

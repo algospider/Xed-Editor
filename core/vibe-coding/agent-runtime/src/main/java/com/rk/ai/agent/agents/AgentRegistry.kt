@@ -155,7 +155,7 @@ class AgentRegistry(
 
     fun getDelegateTool(onResult: suspend (String, AgentResult) -> Unit): Tool = Tool(
         name = "delegateTask",
-        description = "Delegates a task to a specialized sub-agent for parallel execution. Use this for code review, architecture analysis, bug hunting, or test generation while you continue other work.",
+        description = "Delegates a task to a specialized sub-agent and returns the result. Use for code review, architecture analysis, bug hunting, or test generation. The agent executes immediately and returns its output directly.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -174,7 +174,8 @@ class AgentRegistry(
 
             val agent = get(agentName)
             if (agent == null) {
-                return@Tool listOf(UIMessagePart.Text("Agent '$agentName' not found or disabled. Use listAgents to see available agents."))
+                val available = getAllEnabled().joinToString(", ") { it.name }
+                return@Tool listOf(UIMessagePart.Text("Agent '$agentName' not found or disabled. Available: $available"))
             }
 
             val task = AgentTask(
@@ -187,7 +188,33 @@ class AgentRegistry(
             val result = agent.execute(task)
             onResult(agentName, result)
 
-            listOf(UIMessagePart.Text("Task delegated to '$agentName'. Check the agent activity panel for results."))
+            when (result) {
+                is AgentResult.Success -> {
+                    val output = buildString {
+                        appendLine("## Agent '$agentName' Result")
+                        appendLine()
+                        appendLine(result.output)
+                        if (result.filesCreated.isNotEmpty()) {
+                            appendLine()
+                            appendLine("Files created: ${result.filesCreated.joinToString(", ")}")
+                        }
+                        if (result.filesModified.isNotEmpty()) {
+                            appendLine("Files modified: ${result.filesModified.joinToString(", ")}")
+                        }
+                        if (result.summary.isNotBlank()) {
+                            appendLine()
+                            appendLine("Summary: ${result.summary}")
+                        }
+                    }
+                    listOf(UIMessagePart.Text(output))
+                }
+                is AgentResult.Failure -> {
+                    listOf(UIMessagePart.Text("Agent '$agentName' failed: ${result.error}\nConsider breaking the task into smaller parts or providing more context."))
+                }
+                is AgentResult.NotAttempted -> {
+                    listOf(UIMessagePart.Text("Agent '$agentName' could not attempt the task. Check if the agent is properly configured."))
+                }
+            }
         },
     )
 }

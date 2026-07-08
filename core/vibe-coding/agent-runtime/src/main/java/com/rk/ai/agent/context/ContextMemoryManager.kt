@@ -11,6 +11,7 @@ data class ContextBundle(
     val relevantSymbols: List<String> = emptyList(),
     val recentEdits: List<EditRecord> = emptyList(),
     val sessionLog: List<String> = emptyList(),
+    val mentionedPaths: List<String> = emptyList(),
 ) {
     fun isEmpty(): Boolean = goal.isBlank() && projectSummary.isBlank()
     fun toPromptBlock(): String = buildString {
@@ -18,6 +19,7 @@ data class ContextBundle(
         if (projectSummary.isNotBlank()) appendLine("Project: $projectSummary")
         if (relevantFiles.isNotEmpty()) appendLine("Active files: ${relevantFiles.joinToString(", ")}")
         if (relevantSymbols.isNotEmpty()) appendLine("Relevant symbols: ${relevantSymbols.joinToString(", ")}")
+        if (mentionedPaths.isNotEmpty()) appendLine("Files mentioned by user: ${mentionedPaths.joinToString(", ")}")
         if (recentEdits.isNotEmpty()) {
             appendLine("Recent edits:")
             recentEdits.takeLast(5).forEach { appendLine("  - ${it.file} (${it.action})") }
@@ -31,6 +33,7 @@ class ContextMemoryManager(
     val working: WorkingMemory = WorkingMemory(),
 ) {
     fun getBundle(query: String = ""): ContextBundle {
+        val mentionedPaths = extractMentionedPaths(query)
         return ContextBundle(
             goal = conversation.getCurrentGoal(),
             preferences = conversation.getPreferences(),
@@ -42,7 +45,31 @@ class ContextMemoryManager(
             relevantSymbols = project.findSymbol(query),
             recentEdits = working.getState().recentEdits,
             sessionLog = working.getRecentLogs(10),
+            mentionedPaths = mentionedPaths,
         )
+    }
+
+    fun extractMentionedPaths(text: String): List<String> {
+        if (text.isBlank()) return emptyList()
+        val paths = mutableListOf<String>()
+        // Match file paths with extensions
+        val pathPattern = Regex("""(?:^|\s|`|"|')([a-zA-Z0-9_./-]+\.[a-zA-Z0-9]{1,10})(?:\s|`|"|'|$|[,;:)]|\z)""")
+        for (match in pathPattern.findAll(text)) {
+            val path = match.groupValues[1]
+            if (path.contains("/") || path.contains(".")) {
+                val ext = path.substringAfterLast(".")
+                if (ext !in setOf("com", "org", "net", "io", "dev", "app", "ai")) {
+                    paths.add(path)
+                }
+            }
+        }
+        // Match backtick-quoted identifiers that look like filenames
+        val backtickPattern = Regex("""`([^`]+\.[a-zA-Z]{1,10})`""")
+        for (match in backtickPattern.findAll(text)) {
+            val candidate = match.groupValues[1]
+            if (candidate !in paths) paths.add(candidate)
+        }
+        return paths.distinct().take(10)
     }
 
     fun storeProjectInfo(summary: String, structure: String) {

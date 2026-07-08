@@ -8,14 +8,17 @@ import com.rk.ai.core.MessageRole
 object CompactionHandler {
     private const val PRUNE_MINIMUM = 20_000
     private const val PRUNE_PROTECT = 40_000
-    private const val TOOL_OUTPUT_MAX_CHARS = 2_000
+    private const val TOOL_OUTPUT_MAX_CHARS = 4_000
     private val PRUNE_PROTECTED_TOOLS = setOf("skill", "use_skill", "memory_tool")
-    private const val MIN_PRESERVE_RECENT_TOKENS = 2_000
-    private const val MAX_PRESERVE_RECENT_TOKENS = 8_000
+    private const val MIN_PRESERVE_RECENT_TOKENS = 4_000
+    private const val MAX_PRESERVE_RECENT_TOKENS = 16_000
     private const val DEFAULT_TAIL_TURNS = 2
     private const val DOOM_LOOP_THRESHOLD = 3
     private const val PATTERN_WINDOW = 6
     private const val PATTERN_REPEAT_THRESHOLD = 2
+
+    private var runningSummary: String? = null
+    private var compactionGeneration = 0
 
     data class CompactionResult(
         val compactedMessages: List<UIMessage>,
@@ -35,12 +38,14 @@ object CompactionHandler {
         conversation: List<UIMessage>,
         previousSummary: String? = null,
     ): String {
-        val anchor = if (previousSummary != null) {
+        val effectivePrev = previousSummary ?: runningSummary
+        val anchor = if (effectivePrev != null) {
             """
 Update the anchored summary below using the conversation history above.
 Preserve still-true details, remove stale details, and merge in the new facts.
+This is compaction generation #$compactionGeneration — each compaction MUST preserve all information from prior summaries.
 <previous-summary>
-$previousSummary
+$effectivePrev
 </previous-summary>
 """.trimIndent()
         } else {
@@ -106,9 +111,11 @@ ${conversation.joinToString("\n") { m ->
         val totalTokens = TokenEstimator.estimate(messages)
         if (totalTokens <= PRUNE_PROTECT) return CompactionResult(messages, null, 0)
 
+        compactionGeneration++
+
         val budget = minOf(
             MAX_PRESERVE_RECENT_TOKENS,
-            maxOf(MIN_PRESERVE_RECENT_TOKENS, totalTokens / 4)
+            maxOf(MIN_PRESERVE_RECENT_TOKENS, totalTokens / 3)
         )
 
         val tailTurns = mutableListOf<UIMessage>()
@@ -292,6 +299,25 @@ ${conversation.joinToString("\n") { m ->
 [RECOMMENDATION: $details]
 """.trimIndent()
 
+            "doom_loop_escalate" -> """
+[SYSTEM: STUCK — tool '$toolName' keeps failing with the same approach. You MUST try a completely different strategy.
+Previous approach is not working. Consider:
+1. Use a different tool entirely
+2. Break the problem into smaller steps
+3. Read more context before retrying
+4. Ask the user for clarification if the task is ambiguous]
+
+[RECOMMENDATION: $details]
+""".trimIndent()
+
+            "doom_loop_abort" -> """
+[SYSTEM: CRITICAL — repeated failures with '$toolName'. Stop retrying this approach.
+Summarize what you've tried and what failed, then ask the user for guidance.
+Do NOT attempt the same operation again.]
+
+[DETAILS: $details]
+""".trimIndent()
+
             "pattern_loop" -> """
 [SYSTEM: Same tool sequence detected. Pivot to a different strategy and continue.]
 
@@ -315,5 +341,53 @@ Call getGuidelines for a refresher on available tools and strategies.]
             role = MessageRole.SYSTEM,
             parts = listOf(UIMessagePart.Text(message)),
         )
+    }
+
+    fun escalateDoomLoopStrategy(
+        escalationLevel: Int,
+        failingTool: String,
+        recentTools: List<String>,
+    ): Pair<String, String> {
+        return when {
+            escalationLevel <= 0 -> "doom_loop" to
+                "Tool '$failingTool' produced the same result. Try a different approach: " +
+                "use a different tool, read more context first, or break the problem down differently."
+
+            escalationLevel == 1 -> "doom_loop_escalate" to buildString {
+                append("You've been stuck on '$failingTool' for multiple attempts. ")
+                val alternatives = suggestAlternativeTools(failingTool)
+                if (alternatives.isNotEmpty()) {
+                    append("Consider using: ${alternatives.joinToString(", ")}. ")
+                }
+                append("If the file content doesn't match, read it first with readFile to see the actual content.")
+            }
+
+            else -> "doom_loop_abort" to
+                "After ${escalationLevel + DOOM_LOOP_THRESHOLD} attempts with '$failingTool', " +
+                "this approach is not working. Report what you've tried to the user and ask for guidance."
+        }
+    }
+
+    private fun suggestAlternativeTools(failingTool: String): List<String> {
+        return when (failingTool) {
+            "editFile" -> listOf("readFile (verify content first)", "writeFile (full rewrite)", "multiEditFile")
+            "writeFile" -> listOf("editFile (surgical edit)", "createFile")
+            "readFile" -> listOf("readFiles (batch)", "searchAndRead", "searchCode")
+            "searchCode" -> listOf("searchSymbols", "findFiles", "searchAndRead")
+            "runCommand" -> listOf("readFile", "searchCode", "getDiagnostics")
+            "findFiles" -> listOf("listFiles", "searchCode", "getProjectStructure")
+            else -> emptyList()
+        }
+    }
+
+    fun updateRunningSummary(summary: String) {
+        runningSummary = summary
+    }
+
+    fun getRunningSummary(): String? = runningSummary
+
+    fun resetCompactionState() {
+        runningSummary = null
+        compactionGeneration = 0
     }
 }

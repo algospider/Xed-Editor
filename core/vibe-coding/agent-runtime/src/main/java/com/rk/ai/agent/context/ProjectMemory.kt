@@ -30,8 +30,30 @@ class ProjectMemory {
     fun hasFile(path: String): Boolean = fileIndex.containsKey(path)
 
     fun findFiles(query: String): List<String> {
-        val lower = query.lowercase()
-        return fileIndex.keys.filter { it.lowercase().contains(lower) }
+        if (query.isBlank()) return emptyList()
+        val queryTokens = query.lowercase()
+            .split(Regex("[\\s,._\\-/(){}\\[\\]<>:;\"']+"))
+            .filter { it.length >= 2 }
+            .toSet()
+        if (queryTokens.isEmpty()) return fileIndex.keys.filter { it.lowercase().contains(query.lowercase()) }
+
+        return fileIndex.keys
+            .map { path ->
+                val pathLower = path.lowercase()
+                val components = pathLower.split("/", "\\").flatMap { it.split(".", "_", "-") }.filter { it.length >= 2 }
+                val matchScore = queryTokens.sumOf { qt ->
+                    when {
+                        pathLower.contains(qt) -> 2
+                        components.any { c -> c.contains(qt) || qt.contains(c) } -> 1
+                        else -> 0
+                    }.toInt()
+                }
+                path to matchScore
+            }
+            .filter { it.second > 0 }
+            .sortedByDescending { it.second }
+            .take(20)
+            .map { it.first }
     }
 
     fun indexSymbol(name: String, filePath: String) {
@@ -39,7 +61,18 @@ class ProjectMemory {
         if (filePath !in paths) paths.add(filePath)
     }
 
-    fun findSymbol(name: String): List<String> = symbolIndex[name.lowercase()] ?: emptyList()
+    fun findSymbol(name: String): List<String> {
+        if (name.isBlank()) return emptyList()
+        val exact = symbolIndex[name.lowercase()]
+        if (exact != null) return exact
+
+        val nameLower = name.lowercase()
+        return symbolIndex.entries
+            .filter { (key, _) -> key.contains(nameLower) || nameLower.contains(key) }
+            .flatMap { it.value }
+            .distinct()
+            .take(20)
+    }
 
     fun storeRaw(key: String, value: String) { storage[key] = value }
     fun getRaw(key: String): String? = storage[key]

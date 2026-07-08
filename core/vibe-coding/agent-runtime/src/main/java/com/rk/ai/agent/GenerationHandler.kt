@@ -68,9 +68,11 @@ import kotlin.uuid.ExperimentalUuidApi
 
 private const val TAG = "GenerationHandler"
 private const val DOOM_LOOP_THRESHOLD = 3
-private const val MAX_COMPACTIONS = 3
-private const val MAX_TOOL_OUTPUT_CHARS = 10_000
+private const val MAX_COMPACTIONS = 5
+private const val MAX_TOOL_OUTPUT_CHARS = 80_000
 private const val TOOL_OUTPUT_TRUNCATION_SUFFIX = "\n\n[Output truncated at $MAX_TOOL_OUTPUT_CHARS characters]"
+private val WRITE_TOOLS = setOf("editFile", "writeFile", "multiEditFile", "applyBatchEdits", "readAndEdit", "createFile")
+private const val MAX_DOOM_LOOP_STRATEGIES = 3
 
 @Serializable
 sealed interface GenerationChunk {
@@ -408,7 +410,25 @@ class GenerationHandler(
                 }
             }
 
-            // Doom loop detection: check if same tool called repeatedly with same input
+            // Post-edit verification: if write tools were used, inject a verify hint
+            val writtenFiles = executedTools
+                .filter { it.toolName in WRITE_TOOLS && it.executionState is ExecutionState.Completed }
+                .mapNotNull { extractFilePath(it.input) }
+                .distinct()
+            if (writtenFiles.isNotEmpty()) {
+                val verifyHint = UIMessage(
+                    role = MessageRole.SYSTEM,
+                    parts = listOf(UIMessagePart.Text(
+                        "[AUTO-VERIFY] Files modified: ${writtenFiles.joinToString(", ")}. " +
+                        "Run getDiagnostics on changed files to verify correctness. " +
+                        "If a build system is available, consider running a build check."
+                    ))
+                )
+                messages = messages + verifyHint
+                send(GenerationChunk.Messages(messages))
+            }
+
+            // Doom loop detection with escalating strategies
             val currentToolCalls = executedTools.map { it.toolName to it.input }
             if (currentToolCalls == previousToolCalls) {
                 consecutiveRepetitions++
@@ -420,15 +440,23 @@ class GenerationHandler(
                 Log.w(TAG, "Doom loop detected: same tool calls repeated ${consecutiveRepetitions + 1} times")
                 val doomTool = CompactionHandler.detectDoomLoop(messages)
                 if (doomTool != null) {
-                    Log.w(TAG, "Breaking doom loop for tool: $doomTool, injecting recovery hint")
+                    val strategy = CompactionHandler.escalateDoomLoopStrategy(
+                        consecutiveRepetitions - DOOM_LOOP_THRESHOLD,
+                        doomTool,
+                        executedTools.map { it.toolName }.distinct()
+                    )
+                    Log.w(TAG, "Doom loop strategy: ${strategy.first}")
                     val recoveryMsg = CompactionHandler.buildRecoveryMessage(
-                        loopType = "doom_loop",
+                        loopType = strategy.first,
                         toolName = doomTool,
-                        details = "The tool '$doomTool' produced the same result repeatedly. Try a fundamentally different approach instead."
+                        details = strategy.second,
                     )
                     messages = messages + recoveryMsg
                     send(GenerationChunk.Messages(messages))
-                    break
+                    if (consecutiveRepetitions >= DOOM_LOOP_THRESHOLD + MAX_DOOM_LOOP_STRATEGIES) {
+                        break
+                    }
+                    continue
                 }
             }
 
@@ -578,12 +606,22 @@ class GenerationHandler(
 
         val compacted = CompactionHandler.pruneMessages(messages)
         if (compacted.compactedMessages.isNotEmpty() && compacted.prunedCount > 0) {
+            val previousSummary = CompactionHandler.getRunningSummary()
             val summaryText = buildString {
                 appendLine("[Compacted summary of earlier context]")
+                if (previousSummary != null) {
+                    appendLine()
+                    appendLine("--- Accumulated context from prior compactions ---")
+                    appendLine(previousSummary)
+                    appendLine("--- End accumulated context ---")
+                    appendLine()
+                }
                 appendLine("Previous ${compacted.compactedMessages.size} messages consumed ${compacted.prunedCount} tokens of tool output.")
                 appendLine("The remaining context contains the most recent turns.")
                 appendLine("Tool outputs in the compacted portion have been truncated to save context.")
+                appendLine("If you need information from earlier in the conversation, check the accumulated context above.")
             }
+            CompactionHandler.updateRunningSummary(summaryText)
             val summaryMsg = UIMessage(
                 role = MessageRole.SYSTEM,
                 parts = listOf(UIMessagePart.Text(summaryText)),
@@ -618,7 +656,7 @@ class GenerationHandler(
                     is UIMessagePart.Text -> {
                         val text = part.text
                         if (text.length > MAX_TOOL_OUTPUT_CHARS) {
-                            part.copy(text = text.take(MAX_TOOL_OUTPUT_CHARS) + TOOL_OUTPUT_TRUNCATION_SUFFIX)
+                            part.copy(text = smartTruncateToolOutput(text, MAX_TOOL_OUTPUT_CHARS))
                         } else part
                     }
                     else -> part
@@ -758,6 +796,66 @@ class GenerationHandler(
         val lastMsg = messages.lastOrNull() ?: return false
         val lastPart = lastMsg.parts.lastOrNull()
         return lastPart is UIMessagePart.Text && lastPart.text.contains("[length]")
+    }
+
+    private fun smartTruncateToolOutput(text: String, maxChars: Int): String {
+        val headBudget = (maxChars * 0.6).toInt()
+        val tailBudget = (maxChars * 0.2).toInt()
+        val diagBudget = maxChars - headBudget - tailBudget
+
+        val lines = text.lines()
+        if (lines.size <= 10) return text.take(maxChars) + TOOL_OUTPUT_TRUNCATION_SUFFIX
+
+        val headLines = mutableListOf<String>()
+        var headChars = 0
+        for (line in lines) {
+            if (headChars + line.length > headBudget && headLines.isNotEmpty()) break
+            headLines.add(line)
+            headChars += line.length + 1
+        }
+
+        val tailLines = mutableListOf<String>()
+        var tailChars = 0
+        for (line in lines.reversed()) {
+            if (tailChars + line.length > tailBudget && tailLines.isNotEmpty()) break
+            tailLines.add(line)
+            tailChars += line.length + 1
+        }
+        tailLines.reverse()
+
+        val middleStart = headLines.size
+        val middleEnd = lines.size - tailLines.size
+        val diagLines = mutableListOf<String>()
+        var diagChars = 0
+        if (middleStart < middleEnd) {
+            for (i in middleStart until middleEnd) {
+                val line = lines[i]
+                if (line.contains("error", ignoreCase = true) ||
+                    line.contains("exception", ignoreCase = true) ||
+                    line.contains("FAILED", ignoreCase = true) ||
+                    line.contains("warning:", ignoreCase = true) ||
+                    line.matches(Regex("^\\s*(at |Caused by|\\d+\\))"))) {
+                    if (diagChars + line.length <= diagBudget) {
+                        diagLines.add(line)
+                        diagChars += line.length + 1
+                    }
+                }
+            }
+        }
+
+        val omitted = middleEnd - middleStart - diagLines.size
+        return buildString {
+            append(headLines.joinToString("\n"))
+            appendLine()
+            appendLine("\n[... $omitted lines omitted ...]")
+            if (diagLines.isNotEmpty()) {
+                appendLine("\n[Key lines from omitted section:]")
+                append(diagLines.joinToString("\n"))
+                appendLine()
+            }
+            append(tailLines.joinToString("\n"))
+            append(TOOL_OUTPUT_TRUNCATION_SUFFIX)
+        }
     }
 
     private suspend fun generateInternal(
