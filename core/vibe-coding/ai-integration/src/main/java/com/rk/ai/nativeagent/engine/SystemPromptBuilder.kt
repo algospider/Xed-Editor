@@ -1,6 +1,7 @@
 package com.rk.ai.nativeagent.engine
 
 import com.rk.ai.agent.WorkspaceContextCollector
+import com.rk.ai.agent.plan.PlanManager
 import com.rk.ai.agent.tools.VibeCodingSystemTools
 import com.rk.ai.providers.Model
 import com.rk.ai.service.IdeService
@@ -38,6 +39,9 @@ class SystemPromptBuilder(
         if (snapshot.isEmpty()) return ""
         return snapshot.buildContextBlock()
     }
+
+    /** Returns plan context block, or empty string if no active plan. */
+    fun buildPlanContext(): String = PlanManager.buildContext()
 
     private fun buildProjectInstructions(): String? {
         val instructions = projectInstructions?.takeIf { it.isNotBlank() } ?: return null

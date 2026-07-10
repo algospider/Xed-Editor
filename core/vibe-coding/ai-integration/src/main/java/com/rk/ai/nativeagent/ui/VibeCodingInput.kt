@@ -35,24 +35,20 @@ import com.rk.ai.models.UIMessagePart
 import kotlin.uuid.ExperimentalUuidApi
 
 private data class SlashCommand(
-    val id: String,
-    val label: String,
-    val description: String,
-    val icon: ImageVector,
-    val prompt: String,
+    val id: String, val label: String, val description: String,
+    val icon: ImageVector, val prompt: String,
 )
 
-private val slashCommands =
-    listOf(
-        SlashCommand("fix", "Fix", "Fix bugs or errors", Icons.Outlined.BugReport, "Find and fix issues in the current code"),
-        SlashCommand("test", "Test", "Write and run tests", Icons.Outlined.Science, "Write tests for the current code"),
-        SlashCommand("refactor", "Refactor", "Improve code structure", Icons.Outlined.Refresh, "Refactor the current code for better quality"),
-        SlashCommand("explain", "Explain", "Explain selected code", Icons.Outlined.HelpOutline, "Explain the selected code in detail"),
-        SlashCommand("review", "Review", "Code review", Icons.Outlined.RateReview, "Review recent changes for issues"),
-        SlashCommand("doc", "Document", "Add documentation", Icons.Outlined.Description, "Add documentation to the selected code"),
-        SlashCommand("commit", "Commit", "Stage and commit", Icons.Outlined.Commit, "Stage all changes and create a descriptive commit"),
-        SlashCommand("plan", "Plan", "Create execution plan", Icons.Outlined.AccountTree, "Create a step-by-step plan for a complex task"),
-    )
+private val slashCommands = listOf(
+    SlashCommand("fix", "Fix", "Fix bugs or errors", Icons.Outlined.BugReport, "Find and fix issues in the current code"),
+    SlashCommand("test", "Test", "Write and run tests", Icons.Outlined.Science, "Write tests for the current code"),
+    SlashCommand("refactor", "Refactor", "Improve code structure", Icons.Outlined.Refresh, "Refactor the current code for better quality"),
+    SlashCommand("explain", "Explain", "Explain selected code", Icons.Outlined.HelpOutline, "Explain the selected code in detail"),
+    SlashCommand("review", "Review", "Code review", Icons.Outlined.RateReview, "Review recent changes for issues"),
+    SlashCommand("doc", "Document", "Add documentation", Icons.Outlined.Description, "Add documentation to the selected code"),
+    SlashCommand("commit", "Commit", "Stage and commit", Icons.Outlined.Commit, "Stage all changes and create a descriptive commit"),
+    SlashCommand("plan", "Plan", "Create execution plan", Icons.Outlined.AccountTree, "Create a step-by-step plan for a complex task"),
+)
 
 @Composable
 fun VibeCodingInput(
@@ -68,52 +64,21 @@ fun VibeCodingInput(
     var showSlashMenu by remember { mutableStateOf(false) }
     var showQuickActions by remember { mutableStateOf(true) }
 
-    val filePickerLauncher = rememberLauncherForActivityResult(
+    val attachLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
     ) { uri: Uri? ->
         uri?.let {
             try {
-                val bytes = context.contentResolver.openInputStream(it)?.use { stream ->
-                    stream.readBytes()
-                } ?: return@let
-                val fileName = it.lastPathSegment ?: "file"
+                val bytes = context.contentResolver.openInputStream(it)?.use { stream -> stream.readBytes() } ?: return@let
                 val mimeType = context.contentResolver.getType(it) ?: "application/octet-stream"
-                when {
-                    mimeType.startsWith("image/") -> {
-                        attachedParts = attachedParts + UIMessagePart.Image(url = it.toString())
-                    }
-                    else -> {
-                        val content = String(bytes, Charsets.UTF_8)
-                        attachedParts =
-                            attachedParts +
-                                UIMessagePart.Document(
-                                    url = it.toString(),
-                                    fileName = fileName,
-                                    mime = mimeType,
-                                )
-                    }
+                attachedParts = attachedParts + if (mimeType.startsWith("image/")) {
+                    UIMessagePart.Image(url = it.toString())
+                } else {
+                    val fileName = it.lastPathSegment ?: "file"
+                    UIMessagePart.Document(url = it.toString(), fileName = fileName, mime = mimeType)
                 }
             } catch (_: Exception) {}
         }
-    }
-
-    val imagePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
-    ) { uri: Uri? ->
-        uri?.let {
-            try {
-                context.contentResolver.openInputStream(it)?.use { stream ->
-                    stream.readBytes()
-                }
-                attachedParts = attachedParts + UIMessagePart.Image(url = it.toString())
-            } catch (_: Exception) {}
-        }
-    }
-
-    fun executeSlashCommand(cmd: SlashCommand) {
-        textFieldValue = TextFieldValue("/${cmd.id} ")
-        showSlashMenu = false
-        showQuickActions = false
     }
 
     fun send() {
@@ -132,116 +97,80 @@ fun VibeCodingInput(
         tonalElevation = 1.dp,
     ) {
         Column {
-            // Quick action chips (shown when input is empty and not processing)
+            // Quick action chips (when input is empty)
             AnimatedVisibility(
                 visible = showQuickActions && textFieldValue.text.isBlank() && attachedParts.isEmpty() && !isProcessing,
                 enter = fadeIn(),
                 exit = fadeOut(),
             ) {
                 LazyRow(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(slashCommands.take(4)) { action ->
+                    items(slashCommands.take(5)) { action ->
                         SuggestionChip(
-                            onClick = { executeSlashCommand(action) },
-                            label = {
-                                Text(action.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            onClick = {
+                                textFieldValue = TextFieldValue("/${action.id} ")
+                                showSlashMenu = false
+                                showQuickActions = false
                             },
-                            icon = {
-                                Icon(
-                                    action.icon,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
-                                )
-                            },
-                            modifier = Modifier.height(26.dp),
+                            label = { Text(action.label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            icon = { Icon(action.icon, null, modifier = Modifier.size(12.dp)) },
+                            modifier = Modifier.height(24.dp),
                         )
                     }
                 }
             }
 
-            // Attachment chips
+            // Attachments
             AnimatedVisibility(visible = attachedParts.isNotEmpty()) {
-                Column(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
                     attachedParts.forEachIndexed { idx, part ->
-                        val label =
-                            when (part) {
-                                is UIMessagePart.Image -> "🖼 Image ${idx + 1}"
-                                is UIMessagePart.Text -> "📄 ${part.text.take(30)}..."
-                                is UIMessagePart.Document -> "📎 ${part.fileName}"
-                                else -> "📎 File ${idx + 1}"
-                            }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(vertical = 1.dp),
+                        val label = when (part) {
+                            is UIMessagePart.Image -> "🖼 Image ${idx + 1}"
+                            is UIMessagePart.Text -> "📄 ${part.text.take(30)}..."
+                            is UIMessagePart.Document -> "📎 ${part.fileName}"
+                            else -> "📎 File ${idx + 1}"
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.clickable {
+                                attachedParts = attachedParts.toMutableList().also { it.removeAt(idx) }
+                            }.padding(vertical = 1.dp),
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier =
-                                        Modifier.clickable {
-                                            attachedParts = attachedParts.toMutableList().also { it.removeAt(idx) }
-                                        }.padding(horizontal = 8.dp, vertical = 2.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    Text(
-                                        label,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f, fill = false),
-                                    )
-                                    Icon(
-                                        Icons.Outlined.Close,
-                                        contentDescription = "Remove",
-                                        modifier = Modifier.size(12.dp),
-                                        tint = colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
-                                    )
-                                }
+                                Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(Icons.Outlined.Close, "Remove", modifier = Modifier.size(12.dp), tint = colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
                             }
                         }
                     }
                 }
             }
 
-            // Slash command suggestions dropdown
+            // Slash command suggestions
             AnimatedVisibility(
                 visible = showSlashMenu && textFieldValue.text.startsWith("/"),
                 enter = fadeIn(),
                 exit = fadeOut(),
             ) {
                 val query = textFieldValue.text.drop(1).substringBefore(" ").lowercase()
-                val filtered =
-                    if (query.isBlank()) slashCommands
-                    else slashCommands.filter { it.id.contains(query, ignoreCase = true) || it.label.contains(query, ignoreCase = true) }
+                val filtered = if (query.isBlank()) slashCommands
+                else slashCommands.filter { it.id.contains(query, ignoreCase = true) || it.label.contains(query, ignoreCase = true) }
 
                 Surface(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 200.dp)
-                            .padding(horizontal = 8.dp),
-                    shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).padding(horizontal = 8.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = colorScheme.surfaceContainerHigh,
                     tonalElevation = 4.dp,
                     shadowElevation = 4.dp,
                 ) {
-                    LazyColumn(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    ) {
-                        items(filtered) { cmd: SlashCommand ->
+                    LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
+                        items(filtered) { cmd ->
                             Surface(
                                 onClick = {
                                     textFieldValue = TextFieldValue("/${cmd.id} ")
@@ -256,23 +185,10 @@ fun VibeCodingInput(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Icon(
-                                        cmd.icon,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = colorScheme.primary,
-                                    )
+                                    Icon(cmd.icon, null, modifier = Modifier.size(16.dp), tint = colorScheme.primary)
                                     Column {
-                                        Text(
-                                            text = "/${cmd.id}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontWeight = FontWeight.Medium,
-                                        )
-                                        Text(
-                                            text = cmd.description,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        )
+                                        Text("/${cmd.id}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                        Text(cmd.description, style = MaterialTheme.typography.labelSmall, color = colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                                     }
                                 }
                             }
@@ -281,44 +197,23 @@ fun VibeCodingInput(
                 }
             }
 
-            // Main input row
+            // Input row
             Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                // Attachment buttons
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    FilledTonalIconButton(
-                        onClick = { filePickerLauncher.launch("*/*") },
-                        modifier = Modifier.size(30.dp),
-                        enabled = !isProcessing,
-                    ) {
-                        Icon(
-                            Icons.Outlined.AttachFile,
-                            contentDescription = "Attach file",
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                    Spacer(Modifier.height(2.dp))
-                    FilledTonalIconButton(
-                        onClick = { imagePickerLauncher.launch("image/*") },
-                        modifier = Modifier.size(30.dp),
-                        enabled = !isProcessing,
-                    ) {
-                        Icon(
-                            Icons.Outlined.Image,
-                            contentDescription = "Attach image",
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
+                // Single attach button
+                FilledTonalIconButton(
+                    onClick = { attachLauncher.launch("*/*") },
+                    modifier = Modifier.size(34.dp),
+                    enabled = !isProcessing,
+                ) {
+                    Icon(Icons.Outlined.AttachFile, "Attach", modifier = Modifier.size(16.dp))
                 }
 
                 Spacer(Modifier.width(6.dp))
 
-                // Multi-line text input
+                // Input field
                 OutlinedTextField(
                     value = textFieldValue,
                     onValueChange = { newValue ->
@@ -337,97 +232,45 @@ fun VibeCodingInput(
                             return@OutlinedTextField
                         }
                         textFieldValue = newValue
-                        if (newValue.text.startsWith("/") && !prevText.startsWith("/")) {
-                            showSlashMenu = true
-                        }
-                        if (!newValue.text.startsWith("/")) {
-                            showSlashMenu = false
-                        }
-                        if (newValue.text.isNotEmpty()) {
-                            showQuickActions = false
-                        }
-                        if (newValue.text.isBlank() && attachedParts.isEmpty()) {
-                            showQuickActions = true
-                        }
+                        showSlashMenu = newValue.text.startsWith("/") && !prevText.startsWith("/")
+                        if (!newValue.text.startsWith("/")) showSlashMenu = false
+                        showQuickActions = newValue.text.isBlank() && attachedParts.isEmpty()
                     },
-                    modifier =
-                        Modifier
-                            .weight(1f)
-                            .heightIn(min = 40.dp, max = 160.dp),
-                    placeholder = {
-                        Text(
-                            "Ask or type / for commands...",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    },
+                    modifier = Modifier.weight(1f).heightIn(min = 38.dp, max = 140.dp),
+                    placeholder = { Text("Ask or type / for commands...", style = MaterialTheme.typography.bodySmall) },
                     textStyle = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
                     shape = RoundedCornerShape(16.dp),
-                    maxLines = 6,
-                    keyboardOptions =
-                        KeyboardOptions(
-                            keyboardType = KeyboardType.Text,
-                            imeAction = ImeAction.Send,
-                        ),
-                    keyboardActions =
-                        KeyboardActions(
-                            onSend = {
-                                if (textFieldValue.text.isNotBlank() || attachedParts.isNotEmpty()) {
-                                    send()
-                                }
-                            },
-                        ),
-                    colors =
-                        OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = colorScheme.outlineVariant.copy(alpha = 0.3f),
-                            focusedBorderColor = colorScheme.primary.copy(alpha = 0.5f),
-                            unfocusedContainerColor = colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                            focusedContainerColor = colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
-                        ),
+                    maxLines = 5,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { if (textFieldValue.text.isNotBlank() || attachedParts.isNotEmpty()) send() }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedBorderColor = colorScheme.outlineVariant.copy(alpha = 0.3f),
+                        focusedBorderColor = colorScheme.primary.copy(alpha = 0.5f),
+                        unfocusedContainerColor = colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                        focusedContainerColor = colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                    ),
                     enabled = !isProcessing,
                 )
 
                 Spacer(Modifier.width(6.dp))
 
-                // Send / Stop button
+                // Send / Stop
                 FilledIconButton(
-                    onClick = {
-                        if (isProcessing) {
-                            onStop?.invoke()
-                        } else {
-                            send()
-                        }
-                    },
+                    onClick = { if (isProcessing) onStop?.invoke() else send() },
                     modifier = Modifier.size(38.dp),
                     enabled = textFieldValue.text.isNotBlank() || attachedParts.isNotEmpty() || isProcessing,
                     shape = RoundedCornerShape(19.dp),
-                    colors =
-                        IconButtonDefaults.filledIconButtonColors(
-                            containerColor =
-                                if (isProcessing) colorScheme.errorContainer
-                                else colorScheme.primary,
-                            contentColor =
-                                if (isProcessing) colorScheme.onErrorContainer
-                                else colorScheme.onPrimary,
-                        ),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (isProcessing) colorScheme.errorContainer else colorScheme.primary,
+                        contentColor = if (isProcessing) colorScheme.onErrorContainer else colorScheme.onPrimary,
+                    ),
                 ) {
                     Icon(
-                        imageVector =
-                            if (isProcessing) Icons.Outlined.Stop
-                            else Icons.Outlined.Send,
+                        imageVector = if (isProcessing) Icons.Outlined.Stop else Icons.Outlined.Send,
                         contentDescription = if (isProcessing) "Stop" else "Send",
                         modifier = Modifier.size(18.dp),
                     )
                 }
-            }
-
-            // Hint text
-            if (!isProcessing && textFieldValue.text.isBlank()) {
-                Text(
-                    text = "Enter to send · / for commands",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp, start = 12.dp),
-                )
             }
         }
     }

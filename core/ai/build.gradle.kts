@@ -67,4 +67,5 @@ dependencies {
     implementation(project(":core:resources"))
     implementation(project(":core:extension"))
     implementation(project(":core:vibe-coding:ai-service"))
+    implementation(project(":core:vibe-coding:agent-runtime"))
 }

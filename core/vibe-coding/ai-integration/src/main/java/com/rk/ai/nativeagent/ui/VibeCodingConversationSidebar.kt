@@ -30,13 +30,15 @@ fun VibeCodingConversationSidebar(
     onSelectConversation: (Conversation) -> Unit,
     onDeleteConversation: (Conversation) -> Unit = {},
     onDismiss: () -> Unit,
+    refreshTrigger: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     var conversations by remember { mutableStateOf<List<Conversation>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) {
+    // Reload on every show and after delete (refreshTrigger changes)
+    LaunchedEffect(assistantId, refreshTrigger) {
         conversations = conversationRepo.getRecentConversations(
             assistantId = assistantId,
             limit = 50,

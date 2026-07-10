@@ -50,6 +50,7 @@ import com.rk.ai.agent.tools.createSkillTools
 import com.rk.ai.agent.tools.SuggestionStore
 import com.rk.ai.agent.agents.AgentRegistry
 import com.rk.ai.agent.context.ContextMemoryManager
+import com.rk.ai.agent.plan.PlanManager
 import com.rk.ai.agent.planner.TaskPlanner
 import com.rk.ai.core.AppScope
 import com.rk.ai.mcp.FileManager
@@ -509,6 +510,88 @@ class VibeCodingEngine(
         },
     )
 
+    private val planModeTool = Tool(
+        name = "planMode",
+        description = "Create, approve, and track structured execution plans. Actions: create (title + steps JSON → plan, awaiting approval), approve (user accepts), reject (reason), status (show progress), update (stepId + stepStatus + result), cancel. When a plan is awaiting approval, do NOT execute any changes until approved.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    putJsonObject("action") { put("type", "string") }
+                    putJsonObject("title") { put("type", "string") }
+                    putJsonObject("description") { put("type", "string") }
+                    putJsonObject("steps") { put("type", "string") }
+                    putJsonObject("stepId") { put("type", "string") }
+                    putJsonObject("stepStatus") { put("type", "string") }
+                    putJsonObject("result") { put("type", "string") }
+                    putJsonObject("reason") { put("type", "string") }
+                },
+                required = listOf("action"),
+            )
+        },
+        execute = { args ->
+            val action = args.asJsonObject["action"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing 'action'"))
+            val planImports = com.rk.ai.agent.plan.PlanManager
+            when (action.lowercase()) {
+                "create" -> {
+                    val title = args.asJsonObject["title"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("title required"))
+                    val description = args.asJsonObject["description"]?.asJsonPrimitive?.asString ?: ""
+                    val stepsRaw = args.asJsonObject["steps"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("steps (JSON array string) required"))
+                    val steps = try {
+                        val arr = com.google.gson.JsonParser.parseString(stepsRaw).asJsonArray
+                        arr.map { elem ->
+                            if (elem.isJsonPrimitive) elem.asString to ""
+                            else if (elem.isJsonObject) {
+                                val o = elem.asJsonObject
+                                (o["description"]?.asString ?: o["desc"]?.asString ?: "") to (o["details"]?.asString ?: o["detail"]?.asString ?: "")
+                            } else "" to ""
+                        }.filter { it.first.isNotBlank() }
+                    } catch (_: Exception) { return@Tool listOf(UIMessagePart.Text("Invalid steps JSON: must be an array of strings or {description, details} objects")) }
+
+                    if (steps.isEmpty()) return@Tool listOf(UIMessagePart.Text("Steps list is empty"))
+                    val plan = planImports.createPlan(title, description, steps)
+                    val display = buildString {
+                        appendLine("## Plan: ${plan.title}")
+                        if (plan.description.isNotBlank()) appendLine("> ${plan.description}")
+                        appendLine()
+                        plan.steps.forEachIndexed { i, s -> appendLine("${i + 1}. [ ] ${s.description}") }
+                        appendLine()
+                        appendLine("⏳ Awaiting approval. Type 'approve' to start.")
+                    }
+                    listOf(UIMessagePart.Text(display))
+                }
+                "approve" -> {
+                    if (!planImports.isAwaitingApproval()) return@Tool listOf(UIMessagePart.Text("No plan awaiting approval. Create one with planMode create first."))
+                    val plan = planImports.approvePlan()
+                    listOf(UIMessagePart.Text("✅ Plan approved! Starting: ${plan?.title ?: "Untitled"}. Begin with step 1."))
+                }
+                "reject" -> {
+                    val reason = args.asJsonObject["reason"]?.asJsonPrimitive?.asString ?: "No reason"
+                    planImports.rejectPlan(reason)
+                    listOf(UIMessagePart.Text("Plan rejected: $reason. Refine and present again."))
+                }
+                "status" -> {
+                    val ctx = planImports.buildContext()
+                    if (ctx.isBlank()) listOf(UIMessagePart.Text("No active plan."))
+                    else listOf(UIMessagePart.Text(ctx))
+                }
+                "update" -> {
+                    val stepId = args.asJsonObject["stepId"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("stepId required"))
+                    val raw = args.asJsonObject["stepStatus"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("stepStatus required"))
+                    val result = args.asJsonObject["result"]?.asJsonPrimitive?.asString?.takeIf { it.isNotBlank() }
+                    val status = when (raw.lowercase()) { "in_progress","inprogress","started" -> com.rk.ai.agent.plan.StepStatus.IN_PROGRESS; "completed","done" -> com.rk.ai.agent.plan.StepStatus.COMPLETED; "failed","error" -> com.rk.ai.agent.plan.StepStatus.FAILED; "skipped" -> com.rk.ai.agent.plan.StepStatus.SKIPPED; else -> return@Tool listOf(UIMessagePart.Text("bad stepStatus: $raw")) }
+                    val plan = planImports.updateStep(stepId, status, result) ?: planImports.updateStepByDescription(stepId, status, result) ?: return@Tool listOf(UIMessagePart.Text("Step '$stepId' not found"))
+                    val allDone = plan.status == com.rk.ai.agent.plan.PlanStatus.COMPLETED
+                    listOf(UIMessagePart.Text("Step '$stepId' → $raw. ${plan.progressSummary}${if (allDone) "\n🎉 All steps completed!" else ""}"))
+                }
+                "cancel" -> {
+                    planImports.cancelPlan()
+                    listOf(UIMessagePart.Text("Plan cancelled."))
+                }
+                else -> listOf(UIMessagePart.Text("Unknown action: $action. Use: create, approve, reject, status, update, cancel"))
+            }
+        },
+    )
+
     fun refreshCommands() {
         storedCommandCatalog.removeAll { it.id.startsWith("file:") }
         loadFileCommandsIntoCatalog()
@@ -589,6 +672,7 @@ class VibeCodingEngine(
                 skillManager = skillManager,
             ))
             add(todowriteTool)
+            add(planModeTool)
             add(listCustomCommandsTool)
         }
 
@@ -746,20 +830,29 @@ class VibeCodingEngine(
                 initialPromptInjected = true
             }
 
-            // Strip stale workspace context messages from existing history
+            // Strip stale system-context messages (workspace + plan) from history
             val cleaned = messages.filterNot { msg ->
                 msg.role == com.rk.ai.core.MessageRole.SYSTEM &&
                 msg.parts.any { part ->
-                    part is UIMessagePart.Text && part.text.contains("<workspace_context>")
+                    part is UIMessagePart.Text && (
+                        part.text.contains("<workspace_context>") ||
+                        part.text.contains("<active_plan>")
+                    )
                 }
             }
 
             result.addAll(cleaned)
 
-            // Append fresh workspace context right before the newest user message
+            // Append fresh workspace context
             val ctxBlock = systemPromptBuilder.buildWorkspaceContext()
             if (ctxBlock.isNotBlank()) {
                 result.add(UIMessage.system(ctxBlock))
+            }
+
+            // Append fresh plan context (if a plan is active)
+            val planCtx = systemPromptBuilder.buildPlanContext()
+            if (planCtx.isNotBlank()) {
+                result.add(UIMessage.system(planCtx))
             }
 
             return result
@@ -1071,6 +1164,7 @@ class VibeCodingEngine(
     }
 
     fun clearConversation() {
+        PlanManager.clear()
         _state.value = VibeCodingState(
             commandCatalog = storedCommandCatalog.toList(),
             permissionAutoRespondRules = permissionManager.rules,
