@@ -146,8 +146,6 @@ fun TerminalPanel(
                     factory = { context ->
                         VirtualKeysView(context, null).apply {
                             terminalViewModel.virtualKeysView = this
-                            virtualKeysViewClient =
-                                terminalViewModel.terminalView?.mTermSession?.let { VirtualKeysListener(it) }
 
                             buttonTextColor = onSurfaceColor
 
@@ -161,6 +159,11 @@ fun TerminalPanel(
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(36.dp),
+                    update = { view ->
+                        view.virtualKeysViewClient =
+                            terminalViewModel.terminalView?.mTermSession?.let { VirtualKeysListener(it) }
+                        view.buttonTextColor = onSurfaceColor
+                    },
                 )
             }
         }

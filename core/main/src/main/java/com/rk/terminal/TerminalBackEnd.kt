@@ -11,6 +11,7 @@ import android.app.Activity
 import com.rk.settings.Settings
 import com.rk.settings.terminal.TerminalCursorStyle
 import com.rk.terminal.virtualkeys.SpecialButton
+import com.rk.terminal.virtualkeys.VirtualKeysListener
 import com.rk.terminal.changeTerminalSession
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
@@ -182,6 +183,15 @@ class TerminalBackEnd(terminalViewModel: TerminalViewModel? = null) : TerminalVi
 
     override fun onEmulatorSet() {
         setTerminalCursorBlinkingState(true)
+        // Update the VirtualKeysView client now that the session is available
+        // (session may not have been ready when VirtualKeysView was created)
+        val tvm = terminalViewModel
+        if (tvm != null) {
+            val session = tvm.terminalView?.mTermSession
+            if (session != null) {
+                tvm.virtualKeysView?.virtualKeysViewClient = VirtualKeysListener(session)
+            }
+        }
     }
 
     private fun setTerminalCursorBlinkingState(start: Boolean) {
