@@ -7,25 +7,66 @@ import com.termux.terminal.TerminalSession
 class VirtualKeysListener(val session: TerminalSession) : VirtualKeysView.IVirtualKeysView {
 
     override fun onVirtualKeyButtonClick(view: View?, buttonInfo: VirtualKeyButton?, button: Button?) {
+        val bi = buttonInfo ?: return
 
-        val key = buttonInfo?.key ?: return
-        val writeable: String =
-            when (key) {
-                "UP" -> "\u001B[A" // Escape sequence for Up Arrow
-                "DOWN" -> "\u001B[B" // Escape sequence for Down Arrow
-                "LEFT" -> "\u001B[D" // Escape sequence for Left Arrow
-                "RIGHT" -> "\u001B[C" // Escape sequence for Right Arrow
-                "ENTER" -> "\u000D" // Carriage Return for Enter
-                "PGUP" -> "\u001B[5~" // Escape sequence for Page Up
-                "PGDN" -> "\u001B[6~" // Escape sequence for Page Down
-                "TAB" -> "\u0009" // Horizontal Tab
-                "HOME" -> "\u001B[H" // Escape sequence for Home
-                "END" -> "\u001B[F" // Escape sequence for End
-                "ESC" -> "\u001B" // Escape
-                else -> key
+        if (bi.isMacro) {
+            val keys = bi.key.split(" ")
+            var ctrl = false
+            var alt = false
+            var shift = false
+            var fn = false
+            for (key in keys) {
+                when (key) {
+                    "CTRL" -> ctrl = true
+                    "ALT" -> alt = true
+                    "SHIFT" -> shift = true
+                    "FN" -> fn = true
+                    else -> {
+                        writeKey(key, ctrl, alt)
+                        ctrl = false; alt = false; shift = false; fn = false
+                    }
+                }
             }
+            return
+        }
 
-        session.write(writeable)
+        writeKey(bi.key, false, false)
+    }
+
+    private fun writeKey(key: String, ctrl: Boolean, alt: Boolean) {
+        // Ctrl+letter: send control code 1-26 (Ctrl+A = 0x01, ..., Ctrl+Z = 0x1A)
+        if (ctrl && key.length == 1) {
+            val c = key[0].lowercaseChar()
+            if (c in 'a'..'z') {
+                session.write((c - 'a' + 1).toChar().toString())
+                return
+            }
+        }
+
+        val mapped = mapSpecialKey(key)
+        if (mapped != null) {
+            session.write(mapped)
+            return
+        }
+
+        session.write(key)
+    }
+
+    companion object {
+        private fun mapSpecialKey(key: String): String? = when (key) {
+            "UP" -> "\u001B[A"
+            "DOWN" -> "\u001B[B"
+            "LEFT" -> "\u001B[D"
+            "RIGHT" -> "\u001B[C"
+            "ENTER" -> "\u000D"
+            "PGUP" -> "\u001B[5~"
+            "PGDN" -> "\u001B[6~"
+            "TAB" -> "\u0009"
+            "HOME" -> "\u001B[H"
+            "END" -> "\u001B[F"
+            "ESC" -> "\u001B"
+            else -> null
+        }
     }
 
     override fun performVirtualKeyButtonHapticFeedback(

@@ -1,7 +1,12 @@
 @file:OptIn(ExperimentalUuidApi::class)
 package com.rk.ai.nativeagent.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rk.ai.agent.executor.AgentPhase
 import com.rk.ai.models.UIMessage
+import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
 
 @Composable
@@ -92,14 +98,15 @@ fun VibeCodingMessageList(
         }
 
         // ── Scroll-to-bottom FAB (appears when scrolled up) ──
+        val scope = rememberCoroutineScope()
         AnimatedVisibility(
             visible = !isNearBottom && messages.isNotEmpty(),
-            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { it / 4 },
-            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { it / 4 },
+            enter = fadeIn() + slideInVertically { it / 4 },
+            exit = fadeOut() + slideOutVertically { it / 4 },
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 4.dp),
         ) {
             Surface(
-                onClick = { listState.animateScrollToItem(messages.size - 1) },
+                onClick = { scope.launch { listState.animateScrollToItem(messages.size - 1) } },
                 shape = RoundedCornerShape(50),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 tonalElevation = 3.dp,

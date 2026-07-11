@@ -13,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.rk.ai.nativeagent.engine.VibeCodingEngine
 import com.rk.ai.nativeagent.ui.components.*
@@ -58,6 +60,10 @@ fun VibeCodingPanel(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val hasTodos = state.todos.isNotEmpty()
+
+    val workspacePath by remember {
+        derivedStateOf { try { engine.ideService.getPrimaryWorkspacePath() } catch (_: Exception) { "" } }
+    }
 
     // ── Modal bottom sheets ──
     if (activePanel != ToolPanel.NONE) {
@@ -155,11 +161,6 @@ fun VibeCodingPanel(
         }
     }
 
-    val workspacePath by remember {
-        derivedStateOf { try { engine.ideService.getPrimaryWorkspacePath() } catch (_: Exception) { "" } }
-    }
-
-    // ── Main scaffold ──
     Scaffold(
         modifier = modifier.fillMaxSize().onKeyEvent { event ->
             if (event.key == Key.Escape && event.type == KeyEventType.KeyUp) {

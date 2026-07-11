@@ -48,9 +48,13 @@ internal fun VibeCodingToolbar(
             // Model badge
             val settings by engine.settingsStore.settingsFlow.collectAsState()
             val modelName = remember(settings.chatModelId, settings.providers) {
-                settings.providers.flatMap { it.models }
+                val model = settings.providers.flatMap { it.models }
                     .firstOrNull { it.id == settings.chatModelId }
-                    ?.displayName?.ifEmpty { it.modelId } ?: "No model"
+                if (model != null) {
+                    model.displayName?.ifEmpty { model.modelId } ?: model.modelId
+                } else {
+                    "No model"
+                }
             }
             Surface(
                 shape = RoundedCornerShape(6.dp),
