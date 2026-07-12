@@ -37,7 +37,7 @@ internal fun VibeCodingToolbar(
     var showOverflow by remember { mutableStateOf(false) }
 
     Surface(
-        modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+        modifier = Modifier.fillMaxWidth(),
         color = colorScheme.surfaceContainerLow,
         tonalElevation = 0.5.dp,
     ) {
