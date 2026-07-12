@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalUuidApi::class)
+@file:OptIn(ExperimentalUuidApi::class, ExperimentalMaterial3Api::class)
 package com.rk.ai.nativeagent.ui
 
 import androidx.compose.animation.AnimatedVisibility
@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import com.rk.ai.nativeagent.engine.VibeCodingEngine
 import com.rk.ai.nativeagent.ui.components.*
 import com.rk.ai.nativeagent.ui.panels.*
+import com.rk.ai.persistence.settings.getCurrentAssistant
 import com.rk.components.compose.sheet.XedBottomSheet
 import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
