@@ -32,6 +32,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rk.ai.models.UIMessagePart
+import com.rk.ai.nativeagent.engine.VibeCodingEngine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlin.uuid.ExperimentalUuidApi
 
 private data class SlashCommand(
@@ -50,13 +54,34 @@ private val slashCommands = listOf(
     SlashCommand("plan", "Plan", "Create execution plan", Icons.Outlined.AccountTree, "Create a step-by-step plan for a complex task"),
 )
 
+/** Editor selection state polled from ideService. */
+private data class SelectionState(
+    val text: String = "",
+    val length: Int = 0,
+)
+
 @Composable
 fun VibeCodingInput(
     isProcessing: Boolean,
     onSend: (String, List<UIMessagePart>) -> Unit,
     onStop: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    engine: VibeCodingEngine? = null,
 ) {
+    // Poll editor selection to show context chip
+    val selectionState = if (engine != null) {
+        produceState(initialValue = SelectionState()) {
+            while (isActive) {
+                val sel = withContext(Dispatchers.IO) {
+                    try { engine.ideService.getSelection() } catch (_: Exception) { "" }
+                }
+                value = SelectionState(text = sel, length = sel.length)
+                kotlinx.coroutines.delay(1500)
+            }
+        }.value
+    } else {
+        SelectionState()
+    }
     var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
     val colorScheme = MaterialTheme.colorScheme
     val context = LocalContext.current
@@ -209,6 +234,40 @@ fun VibeCodingInput(
                     enabled = !isProcessing,
                 ) {
                     Icon(Icons.Outlined.AttachFile, "Attach", modifier = Modifier.size(16.dp))
+                }
+
+                // Selection context chip (when editor has selected text)
+                if (selectionState.length > 0 && textFieldValue.text.isBlank() && !isProcessing) {
+                    Surface(
+                        onClick = {
+                            textFieldValue = TextFieldValue("Selected: ${selectionState.text.take(200)}")
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                        modifier = Modifier.heightIn(max = 32.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(Icons.Outlined.Edit, null, modifier = Modifier.size(12.dp), tint = colorScheme.onTertiaryContainer)
+                            Text(
+                                text = "Selected: ${selectionState.text.take(30)}${if (selectionState.length > 30) "..." else ""}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                maxLines = 1,
+                                color = colorScheme.onTertiaryContainer,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 120.dp),
+                            )
+                            Text(
+                                text = "${selectionState.length}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                color = colorScheme.onTertiaryContainer.copy(alpha = 0.6f),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(4.dp))
                 }
 
                 Spacer(Modifier.width(6.dp))

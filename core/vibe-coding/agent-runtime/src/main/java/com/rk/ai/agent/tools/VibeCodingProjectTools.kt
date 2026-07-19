@@ -199,11 +199,11 @@ class VibeCodingProjectTools(private val ideService: IdeService) {
             val workspacePath = ideService.getPrimaryWorkspacePath()
             val result = when (action.lowercase()) {
                 "build" -> { val idx = projectIndexer.index(workspacePath); "Indexed ${idx.files.size} files, ${idx.symbols.size} symbols, ${idx.modules.size} modules." }
-                "search" -> { val idx = projectIndexer.index(workspacePath); "Symbols:\n${idx.symbols.filter { it.name.contains(query, true) }.take(50).joinToString("\n") { "- [${it.kind}] ${it.name} in ${it.file.substringAfterLast("/")}:${it.line}" }}" }
-                "stats" -> { val idx = projectIndexer.index(workspacePath); "Files: ${idx.files.size}\nSymbols: ${idx.symbols.size}\nModules: ${idx.modules.size}\nDeps: ${idx.dependencies.size}" }
+                "search" -> { val idx = projectIndexer.reindexChanged(workspacePath); "Symbols:\n${idx.symbols.filter { it.name.contains(query, true) }.take(50).joinToString("\n") { "- [${it.kind}] ${it.name} in ${it.file.substringAfterLast("/")}:${it.line}" }}" }
+                "stats" -> { val idx = projectIndexer.reindexChanged(workspacePath); "Files: ${idx.files.size}\nSymbols: ${idx.symbols.size}\nModules: ${idx.modules.size}\nDeps: ${idx.dependencies.size}" }
                 "architecture" -> {
                     val config = ideService.getProjectConfig(workspacePath)
-                    val idx = projectIndexer.index(workspacePath)
+                    val idx = projectIndexer.reindexChanged(workspacePath)
                     val pkgs = idx.packageStructure.keys.sortedByDescending { idx.packageStructure[it]?.size ?: 0 }.take(15)
                     "Project: ${config["name"]?.asString ?: workspacePath.split("/").lastOrNull()}\nModules: ${idx.modules.joinToString(", ") { it.name }}\nPackages:\n${pkgs.joinToString("\n") { "- $it (${idx.packageStructure[it]?.size ?: 0} files)" }}"
                 }
@@ -233,7 +233,7 @@ class VibeCodingProjectTools(private val ideService: IdeService) {
             val query = obj["query"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'query'."))
             val maxResults = (obj["maxResults"]?.asJsonPrimitive?.asInt ?: 20).coerceIn(1, 100)
             val ws = ideService.getPrimaryWorkspacePath()
-            val index = projectIndexer.index(ws)
+            val index = projectIndexer.reindexChanged(ws)
             val q = query.lowercase()
             val syms = index.symbols.filter { it.name.lowercase().contains(q) || it.file.lowercase().contains(q) }.take(maxResults)
             val files = index.files.filter { it.path.lowercase().contains(q) }.take(maxResults)

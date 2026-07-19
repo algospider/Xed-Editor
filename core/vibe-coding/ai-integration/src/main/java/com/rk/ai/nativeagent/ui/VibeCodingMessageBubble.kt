@@ -24,6 +24,27 @@ import com.rk.ai.models.UIMessage
 import com.rk.ai.models.UIMessagePart
 import com.rk.ai.nativeagent.ui.markdown.MarkdownContent
 
+/** Extracts code block content from markdown text. Returns list of (language, code). */
+private fun extractCodeBlocks(text: String): List<Pair<String, String>> {
+    val blocks = mutableListOf<Pair<String, String>>()
+    val regex = Regex("```(\\w*)\\s*\\n([\\s\\S]*?)```")
+    regex.findAll(text).forEach { match ->
+        val lang = match.groupValues[1].ifBlank { "" }
+        val code = match.groupValues[2].trimEnd()
+        if (code.isNotBlank()) {
+            blocks.add(lang to code)
+        }
+    }
+    return blocks
+}
+
+/** Detects if any text part contains code fences. */
+private fun hasCodeFences(parts: List<UIMessagePart>): Boolean {
+    return parts.any { part ->
+        part is UIMessagePart.Text && part.text.contains("```")
+    }
+}
+
 @Composable
 fun VibeCodingMessageBubble(
     message: UIMessage,
@@ -32,6 +53,7 @@ fun VibeCodingMessageBubble(
     onAnswerTool: ((String, String) -> Unit)? = null,
     onCopy: ((String) -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
+    onApplyCode: ((String, String) -> Unit)? = null, // (code, language) -> Unit
     modifier: Modifier = Modifier,
 ) {
     val isUser = message.role == MessageRole.USER
@@ -41,6 +63,12 @@ fun VibeCodingMessageBubble(
     if (isSystem) {
         SystemMessage(message = message)
         return
+    }
+
+    val hasCode = remember(message.parts) { hasCodeFences(message.parts) }
+    val codeBlocks = remember(message.parts) {
+        message.parts.filterIsInstance<UIMessagePart.Text>()
+            .flatMap { extractCodeBlocks(it.text) }
     }
 
     Box(
@@ -73,6 +101,21 @@ fun VibeCodingMessageBubble(
                     MessagePartContent(part, isUser, onApproveTool, onDenyTool, onAnswerTool)
                     if (i < message.parts.lastIndex) Spacer(Modifier.height(4.dp))
                 }
+
+                // Code action row (assistant messages with code blocks only)
+                if (!isUser && hasCode && codeBlocks.isNotEmpty() && onApplyCode != null) {
+                    Spacer(Modifier.height(6.dp))
+                    HorizontalDivider(
+                        color = colorScheme.outlineVariant.copy(alpha = 0.12f),
+                        thickness = 0.5.dp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    CodeActionRow(
+                        codeBlocks = codeBlocks,
+                        onApplyCode = onApplyCode,
+                        colorScheme = colorScheme,
+                    )
+                }
             }
         }
 
@@ -104,6 +147,73 @@ fun VibeCodingMessageBubble(
                     tint = colorScheme.error.copy(alpha = 0.4f),
                 )
             }
+        }
+    }
+}
+
+/** Row of quick-action chips for each code block in the assistant message. */
+@Composable
+private fun CodeActionRow(
+    codeBlocks: List<Pair<String, String>>,
+    onApplyCode: (String, String) -> Unit,
+    colorScheme: ColorScheme,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        codeBlocks.take(3).forEachIndexed { idx, (lang, code) ->
+            val label = if (lang.isNotBlank()) "$lang (${
+                when {
+                    code.length > 100 -> "${code.take(50)}..."
+                    else -> code.take(50)
+                }
+            })" else "Code block ${idx + 1}"
+            val shortLabel = if (lang.isNotBlank()) lang.uppercase() else "Code"
+
+            Surface(
+                onClick = { onApplyCode(code, lang) },
+                shape = RoundedCornerShape(6.dp),
+                color = colorScheme.primary.copy(alpha = 0.08f),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Code,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = colorScheme.primary.copy(alpha = 0.7f),
+                    )
+                    Text(
+                        text = shortLabel,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                        fontWeight = FontWeight.SemiBold,
+                        color = colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    Text(
+                        text = label.take(40),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        Icons.Outlined.OpenInNew,
+                        contentDescription = "Apply",
+                        modifier = Modifier.size(10.dp),
+                        tint = colorScheme.primary.copy(alpha = 0.5f),
+                    )
+                }
+            }
+        }
+        if (codeBlocks.size > 3) {
+            Text(
+                text = "+${codeBlocks.size - 3} more code blocks",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                color = colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            )
         }
     }
 }

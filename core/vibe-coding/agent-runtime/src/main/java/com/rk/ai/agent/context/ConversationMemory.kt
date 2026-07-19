@@ -38,25 +38,72 @@ class ConversationMemory {
 
     fun getInstructions(): List<String> = previousInstructions.toList()
 
+    /**
+     * Adds a fact with semantic deduplication.
+     *
+     * A fact is skipped if an existing fact shares high word overlap,
+     * preventing near-duplicate entries from bloating the context.
+     */
     fun addFact(fact: String) {
         val trimmed = fact.trim()
-        if (trimmed.isNotBlank() && trimmed !in extractedFacts) {
-            extractedFacts.add(trimmed)
-            if (extractedFacts.size > 50) extractedFacts.removeAt(0)
-        }
+        if (trimmed.isBlank()) return
+
+        // Exact dedup
+        if (trimmed in extractedFacts) return
+
+        // Semantic dedup: skip if a very similar fact already exists
+        // (high common-word overlap suggests they convey the same info)
+        if (extractedFacts.any { existing -> isNearDuplicate(trimmed, existing) }) return
+
+        extractedFacts.add(trimmed)
+        if (extractedFacts.size > 50) extractedFacts.removeAt(0)
     }
 
+    /**
+     * Returns relevant facts for a query, scored by token overlap.
+     * Scored by token overlap, then filtered to the top 15 and
+     * further deduplicated against the query itself.
+     */
     fun getRelevantFacts(query: String): List<String> {
+        if (extractedFacts.isEmpty()) return emptyList()
+
         if (query.isBlank()) return extractedFacts.takeLast(10)
+
         val queryTokens = tokenize(query)
         if (queryTokens.isEmpty()) return extractedFacts.takeLast(10)
 
-        return extractedFacts
+        // Score each fact by token overlap with query
+        val scored = extractedFacts
             .map { fact -> fact to scoreRelevance(queryTokens, fact) }
             .filter { it.second > 0.0 }
             .sortedByDescending { it.second }
-            .take(15)
-            .map { it.first }
+
+        // Take the top 15 most relevant
+        return scored.take(15).map { it.first }
+    }
+
+    /**
+     * Returns the most recent facts directly (used when there's no query context).
+     */
+    fun getRecentFacts(count: Int = 10): List<String> =
+        extractedFacts.takeLast(count)
+
+    /**
+     * Checks if two fact strings are near-duplicates based on
+     * high common-word overlap.
+     */
+    private fun isNearDuplicate(a: String, b: String): Boolean {
+        if (a.length < 10 || b.length < 10) return false
+        val tokensA = tokenize(a)
+        val tokensB = tokenize(b)
+        if (tokensA.isEmpty() || tokensB.isEmpty()) return false
+
+        val smaller = if (tokensA.size <= tokensB.size) tokensA else tokensB
+        val larger = if (tokensA.size <= tokensB.size) tokensB else tokensA
+        val overlap = smaller.count { it in larger }
+        val ratio = overlap.toDouble() / smaller.size
+        // If >70% of the smaller fact's words appear in the larger one, they're near-duplicates
+        return ratio > 0.7 && smaller.size >= 2
     }
 
     private fun tokenize(text: String): Set<String> {

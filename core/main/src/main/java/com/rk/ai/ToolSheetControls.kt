@@ -128,7 +128,57 @@ fun ToolSheetControls(
             }
         }
 
-        BottomPanelMode.VIBE_CODING -> {}
+        BottomPanelMode.VIBE_CODING -> {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilledTonalIconButton(
+                    onClick = onUndo,
+                    enabled = canUndo,
+                    modifier = Modifier.size(32.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = colorScheme.surfaceContainerHigh
+                    )
+                ) {
+                    XedIcon(
+                        com.rk.icons.Icon.DrawableRes(drawables.undo),
+                        modifier = Modifier.size(16.dp),
+                        tint = if (canUndo) colorScheme.onSurface else colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                }
+
+                FilledTonalIconButton(
+                    onClick = onRedo,
+                    enabled = canRedo,
+                    modifier = Modifier.size(32.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = colorScheme.surfaceContainerHigh
+                    )
+                ) {
+                    XedIcon(
+                        com.rk.icons.Icon.DrawableRes(drawables.redo),
+                        modifier = Modifier.size(16.dp),
+                        tint = if (canRedo) colorScheme.onSurface else colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                }
+
+                FilledTonalIconButton(
+                    onClick = onSyncFiles,
+                    modifier = Modifier.size(32.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = colorScheme.surfaceContainerHigh
+                    )
+                ) {
+                    Icon(
+                        Icons.Outlined.Save,
+                        contentDescription = "Sync",
+                        modifier = Modifier.size(16.dp),
+                        tint = colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
         BottomPanelMode.GIT -> {}
     }
 }

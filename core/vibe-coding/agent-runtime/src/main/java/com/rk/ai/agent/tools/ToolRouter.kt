@@ -70,6 +70,31 @@ class ToolRouter(
         }
     }
 
+    /**
+     * Logs tool effectiveness insights into conversation memory so the LLM
+     * can avoid repeatedly trying failing tools and prefer more reliable ones.
+     *
+     * Call after each task execution loop completes.
+     */
+    fun logEffectivenessInsights(contextMemory: com.rk.ai.agent.context.ContextMemoryManager) {
+        for ((name, s) in stats) {
+            // Tools with > 50% failure rate and at least 3 attempts
+            if (s.callCount >= 3 && s.errorCount > 0 && s.errorCount.toFloat() / s.callCount > 0.5f) {
+                contextMemory.addFact(
+                    "Tool '$name' has high failure rate (${s.errorCount}/" +
+                        "${s.callCount}) — prefer alternatives for this task"
+                )
+            }
+            // Tools with very low cache usage and high latency — suggest caching
+            if (s.callCount >= 5 && s.cacheHitCount == 0 && s.totalDurationMs > 1000) {
+                contextMemory.addFact(
+                    "Tool '$name' is called frequently (${s.callCount}x) " +
+                        "without caching — results could be cached"
+                )
+            }
+        }
+    }
+
     fun getStatsReport(): String = buildString {
         appendLine("Tool Usage Statistics:")
         appendLine()

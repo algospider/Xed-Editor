@@ -85,15 +85,17 @@ class VibeCodingSearchTools(private val ideService: IdeService) {
 
     private val searchAndRead = Tool(
         name = "searchAndRead",
-        description = "COMBINED: Search for text AND read matching files in one call. " +
-            "Returns search results with full file contents inline — saves 2+ round-trips vs searchCode + readFiles. " +
-            "Use when exploring unknown code: search a pattern and immediately see the surrounding context. " +
+        description = "COMBINED: Search for text AND read matching file sections in one call. " +
+            "Returns context windows around each match (±15 lines) instead of full file content — " +
+            "saves 2+ round-trips vs searchCode + readFiles, and is far more efficient for large files. " +
+            "Use when exploring unknown code: search a pattern and immediately see surrounding context. " +
             "Example: {\"query\": \"class UserService\"} or {\"query\": \"TODO|FIXME\", \"isRegex\": true}",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     putJsonObject("query") { put("type", "string"); put("description", "Text or regex pattern to search for") }
                     putJsonObject("limit") { put("type", "integer"); put("description", "Max files to read (default: 5, max: 20)") }
+                    putJsonObject("contextLines") { put("type", "integer"); put("description", "Lines of context around each match (default: 15, max: 50)") }
                     putJsonObject("isRegex") { put("type", "boolean"); put("description", "Treat query as regex (default: false)") }
                     putJsonObject("path") { put("type", "string"); put("description", "Scope to a specific directory (optional)") }
                 },
@@ -105,24 +107,51 @@ class VibeCodingSearchTools(private val ideService: IdeService) {
             val query = obj["query"]?.asJsonPrimitive?.asString
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'query' parameter."))
             val limit = (obj["limit"]?.asJsonPrimitive?.asInt ?: 5).coerceIn(1, 20)
+            val contextLines = (obj["contextLines"]?.asJsonPrimitive?.asInt ?: 15).coerceIn(1, 50)
             val isRegex = obj["isRegex"]?.asJsonPrimitive?.asBoolean ?: false
             val path = obj["path"]?.asJsonPrimitive?.asString
             val results = ideService.searchCode(query, limit * 3, path, isRegex)
             if (results.size() == 0) return@Tool listOf(UIMessagePart.Text("No results for: $query"))
 
-            val seenFiles = linkedSetOf<String>()
-            val matchLines = results.mapNotNull { el ->
-                val p = el.asJsonObject["path"]?.asString ?: return@mapNotNull null
-                seenFiles.add(p); "$p:${el.asJsonObject["line"]?.asInt ?: 0}"
+            // Group matches by file with their line numbers
+            val fileMatches = linkedMapOf<String, MutableList<Int>>()
+            results.forEach { el ->
+                val p = el.asJsonObject["path"]?.asString
+                val ln = el.asJsonObject["line"]?.asInt ?: 0
+                if (p != null) fileMatches.getOrPut(p) { mutableListOf() }.add(ln)
             }
-            val fileContents = seenFiles.take(limit).mapNotNull { filePath ->
-                val resolved = ideService.resolvePath(filePath)
-                val content = ideService.getFileContent(resolved?.absolutePath ?: filePath, null, null)
-                if (content != null) "--- $filePath ---\n$content" else null
+
+            val matchLines = fileMatches.flatMap { (f, lines) ->
+                lines.map { "$f:$it" }
+            }
+
+            val fileContents = fileMatches.entries.take(limit).mapNotNull { (filePath, lines) ->
+                val resolved = ideService.resolvePath(filePath) ?: return@mapNotNull null
+                val absPath = resolved.absolutePath
+                // Read context windows around each match (±contextLines lines)
+                val sorted = lines.sorted().distinct()
+                val windows = mutableListOf<String>()
+                for (ln in sorted) {
+                    val start = (ln - contextLines).coerceAtLeast(1)
+                    val end = ln + contextLines
+                    val snippet = ideService.getFileContent(absPath, start, end)
+                    if (snippet != null) {
+                        windows.add("... L$start (match at L$ln)")
+                        windows.add(snippet.trimEnd())
+                        windows.add("...")
+                    }
+                }
+                if (windows.isNotEmpty()) {
+                    "--- $filePath (${sorted.size} matches, context: ±${contextLines}L) ---\n${windows.joinToString("\n")}"
+                } else {
+                    // Fallback: read the whole file if context reads fail
+                    val full = ideService.getFileContent(absPath, null, null)
+                    if (full != null) "--- $filePath ---\n$full" else null
+                }
             }
             listOf(UIMessagePart.Text(buildString {
                 appendLine("Search: $query")
-                appendLine("Matches: ${matchLines.joinToString(", ")}")
+                appendLine("Matches (${matchLines.size}): ${matchLines.joinToString(", ")}")
                 if (fileContents.isNotEmpty()) { appendLine(); append(fileContents.joinToString("\n\n")) }
             }))
         },

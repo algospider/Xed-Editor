@@ -341,16 +341,28 @@ class VibeCodingToolDefinitions(
             add(askUserTool)
         }
 
-        val dispatchTools = baseTools
+        val cfg = configProvider.unifiedConfig.value
+        // Apply permission wrapping to base tools so the parallel tool dispatches
+        // to permission-checked versions (NOT the raw originals).
+        val permittedBaseTools = baseTools
+            .filter { cfg.isToolEnabled(it.name) }
+            .map { permissionManager.wrapToolWithPermissionCheck(it) { getState() } }
+
         val parallelTool = Tool(
             name = "parallel",
-            description = "Execute multiple independent tool calls concurrently. Accepts a JSON array of {tool, args} objects. Results are ordered with headers showing which call produced which output.",
+            description = "Execute MULTIPLE independent tool calls CONCURRENTLY in ONE round-trip — the most efficient way to batch operations. " +
+                "Use for: (1) reading multiple unrelated files at once instead of sequential readFile calls, " +
+                "(2) searching and reading in parallel, (3) any set of independent operations. " +
+                "Results are ordered with headers showing which call produced which output. " +
+                "Do NOT parallelize state-mutating tools (writeFile, editFile) with each other or with reads of the same file — race conditions.",
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
                         putJsonObject("calls") {
                             put("type", "array")
-                            put("description", "Array of {tool: string, args: object} calls to run in parallel. Tools that modify state (writeFile, editFile, etc.) should NOT be parallelized with each other or with reads of the same files.")
+                            put("description", "Array of {tool: string, args: object} calls to run in parallel. " +
+                                "Batch independent reads together (e.g., read multiple unrelated files at once). " +
+                                "Tools that modify state (writeFile, editFile, etc.) must NOT be parallelized with each other or with reads of the same files.")
                             putJsonObject("items") {
                                 put("type", "object")
                                 putJsonObject("properties") {
@@ -368,7 +380,9 @@ class VibeCodingToolDefinitions(
                 val obj = args.asJsonObject
                 val calls = obj["calls"]?.asJsonArray
                     ?: return@Tool listOf(UIMessagePart.Text("Missing 'calls' array"))
-                val toolMap = dispatchTools.associateBy { it.name }
+                // Uses permission-wrapped tools so writeFile/editFile etc. are still
+                // subject to deny/ask rules even when invoked inside a parallel batch.
+                val toolMap = permittedBaseTools.associateBy { it.name }
 
                 val results: List<List<UIMessagePart>> = coroutineScope {
                     calls.map { callElement ->
@@ -408,11 +422,7 @@ class VibeCodingToolDefinitions(
             }
         )
 
-        val cfg = configProvider.unifiedConfig.value
-        return (baseTools + parallelTool)
-            .filter { tool -> cfg.isToolEnabled(tool.name) }
-            .map { tool ->
-                permissionManager.wrapToolWithPermissionCheck(tool) { getState() }
-            }
+        // Wrap parallelTool itself; permittedBaseTools are already wrapped above.
+        return permittedBaseTools + permissionManager.wrapToolWithPermissionCheck(parallelTool) { getState() }
     }
 }

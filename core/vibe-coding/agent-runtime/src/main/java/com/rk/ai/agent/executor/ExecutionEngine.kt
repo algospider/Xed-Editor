@@ -95,6 +95,8 @@ class ExecutionEngine(
         val context = contextMemory.getBundle(task.description)
         val errors = mutableListOf<String>()
         val modifiedFiles = mutableListOf<String>()
+        val toolFailureCount = mutableMapOf<String, Int>()
+        selfReviewer.resetTracking()
 
         val prompt = buildPrompt(task, context)
         val response = generateWithLLM(prompt, tools, context)
@@ -114,6 +116,7 @@ class ExecutionEngine(
             val loopInfo = loopDetector.detect()
             if (loopInfo != null) {
                 contextMemory.log("LOOP DETECTED [${loopInfo.severity}]: ${loopInfo.description}")
+                contextMemory.addFact("Loop detected: ${loopInfo.pattern} — ${loopInfo.suggestion.take(120)}")
                 if (loopInfo.severity == LoopSeverity.CRITICAL) {
                     errors.add("Loop detected: ${loopInfo.suggestion}")
                     break
@@ -176,10 +179,19 @@ class ExecutionEngine(
                     if (filePath != null) {
                         modifiedFiles.add(filePath)
                         contextMemory.recordEdit(filePath, toolCall.name)
+                        selfReviewer.trackEdit(filePath, toolCall.name)
                     }
                 }
 
-                val review = selfReviewer.reviewToolResults(toolCall.name, toolCall.input, result, ExecutionState.Completed(toolCall.name), context)
+                val readFilePath = if (toolCall.name in listOf("readFile", "cat", "getFileContent")) {
+                    extractFilePath(toolCall.input)
+                } else null
+                val review = selfReviewer.reviewToolResults(
+                    toolCall.name, toolCall.input, result,
+                    ExecutionState.Completed(toolCall.name), context,
+                    loopInfo = loopInfo,
+                    filePath = readFilePath,
+                )
                 val shouldCache = review.passed && review.score >= 50
                 if (shouldCache) {
                     toolCache.put(toolCall.name, argsHash, result)
@@ -193,7 +205,11 @@ class ExecutionEngine(
                         contextMemory.log("Retrying ${toolCall.name} (attempt ${attempt + 1})")
                         try {
                             val retryResult = toolDef.execute(args)
-                            val retryReview = selfReviewer.reviewToolResults(toolCall.name, toolCall.input, retryResult, ExecutionState.Completed(toolCall.name), context)
+                            val retryReview = selfReviewer.reviewToolResults(
+                                toolCall.name, toolCall.input, retryResult,
+                                ExecutionState.Completed(toolCall.name), context,
+                                loopInfo = loopInfo,
+                            )
                             latestReview = retryReview
                             if (retryReview.passed || retryReview.score >= 50) {
                                 toolCache.put(toolCall.name, argsHash, retryResult)
@@ -214,6 +230,24 @@ class ExecutionEngine(
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - execStart
                 toolRouter.recordExecution(toolCall.name, toolCall.input, duration, false, false)
+
+                // Track failures and suggest alternative tools when a tool keeps failing
+                val failCount = toolFailureCount.getOrDefault(toolCall.name, 0) + 1
+                toolFailureCount[toolCall.name] = failCount
+                val alternative = if (failCount >= 2) recoveryEngine.suggestAlternativeTool(
+                    toolName = toolCall.name,
+                    errorMessage = e.message ?: "",
+                    failureCount = failCount,
+                ) else null
+                val altSuggestion = if (alternative != null) {
+                    val msg = "Alternative tool suggestion: use '${alternative.suggestedTool}' — ${alternative.reason}"
+                    contextMemory.log(msg)
+                    if (alternative.inputTemplate.isNotBlank()) {
+                        "\nAlternative: use '${alternative.suggestedTool}' — ${alternative.reason}\nTemplate: ${alternative.inputTemplate}"
+                    } else {
+                        "\nAlternative: use '${alternative.suggestedTool}' — ${alternative.reason}"
+                    }
+                } else ""
 
                 val recoveryAction = recoveryEngine.analyzeFailure(
                     toolName = toolCall.name,
@@ -240,6 +274,7 @@ class ExecutionEngine(
                             val retryReview = selfReviewer.reviewToolResults(
                                 toolCall.name, toolCall.input, retryResult,
                                 ExecutionState.Completed(toolCall.name), context,
+                                loopInfo = loopInfo,
                             )
                             if (retryReview.passed || retryReview.score >= 50) {
                                 toolCache.put(toolCall.name, argsHash, retryResult)
@@ -248,17 +283,29 @@ class ExecutionEngine(
                             }
                         } catch (retryException: Exception) {
                             contextMemory.log("Recovery retry also failed: ${retryException.message}")
-                            errors.add("${toolCall.name}: ${e.message} (recovery attempted but retry failed: ${retryException.message})")
+                            errors.add("${toolCall.name}: ${e.message} (recovery attempted but retry failed: ${retryException.message})$altSuggestion")
                             Log.w(TAG, "Recovery retry failed: ${toolCall.name}", retryException)
                             continue
                         }
                     }
                 }
 
-                errors.add("${toolCall.name}: ${e.message}$recoveryMsg")
+                errors.add("${toolCall.name}: ${e.message}$recoveryMsg$altSuggestion")
                 Log.w(TAG, "Tool execution failed: ${toolCall.name}", e)
             }
         }
+
+        // ── Cross-file consistency check ────────────────────────────────
+        val crossFileReport = selfReviewer.crossFileConsistencyCheck()
+        if (!crossFileReport.passed) {
+            contextMemory.log("Cross-file consistency: ${crossFileReport.feedback.take(200)}")
+            for (suggestion in crossFileReport.suggestions) {
+                contextMemory.log("Suggestion: $suggestion")
+            }
+        }
+
+        // ── Tool effectiveness insights ──────────────────────────────────
+        toolRouter.logEffectivenessInsights(contextMemory)
 
         val isSuccessful = errors.size <= VibeCodingConstants.MAX_CONSECUTIVE_ERRORS
 

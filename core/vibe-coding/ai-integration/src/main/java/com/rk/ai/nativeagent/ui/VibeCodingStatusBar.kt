@@ -17,12 +17,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rk.ai.agent.executor.AgentPhase
+import com.rk.ai.models.ExecutionState
+import com.rk.ai.nativeagent.engine.VibeCodingEngine
 import com.rk.ai.nativeagent.engine.VibeCodingState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 
 @Composable
 fun VibeCodingStatusBar(
     state: VibeCodingState,
     modifier: Modifier = Modifier,
+    engine: VibeCodingEngine? = null,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val phaseColor = PhaseDisplay.color(state.currentPhase, colorScheme)
@@ -34,6 +40,21 @@ fun VibeCodingStatusBar(
         animationSpec = infiniteRepeatable(animation = tween(800, easing = EaseInOutCubic), repeatMode = RepeatMode.Reverse),
         label = "statusPulse",
     )
+
+    // Poll active tool name from running executions
+    val activeToolName = remember(state.toolExecutions) {
+        state.toolExecutions.lastOrNull { exec ->
+            exec.executionState is ExecutionState.Running ||
+            exec.toolName != null
+        }?.toolName ?: ""
+    }
+
+    val fileChangeCount = remember(state.toolExecutions) {
+        state.toolExecutions.count { exec ->
+            exec.toolName == "edit" || exec.toolName == "write" || exec.toolName == "create" ||
+            exec.toolName == "patch" || exec.toolName == "deleteFile"
+        }
+    }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -61,7 +82,30 @@ fun VibeCodingStatusBar(
             }
 
             // Right: minimal stats
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Active tool name (during execution)
+                if (activeToolName.isNotBlank() && isActive) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Handyman, null, modifier = Modifier.size(8.dp), tint = colorScheme.primary.copy(alpha = 0.6f))
+                        Spacer(Modifier.width(2.dp))
+                        Text(
+                            text = activeToolName,
+                            style = MaterialTheme.typography.labelSmall, fontSize = 8.sp,
+                            color = colorScheme.primary.copy(alpha = 0.6f),
+                            maxLines = 1,
+                        )
+                    }
+                }
+
+                // File changes count
+                if (fileChangeCount > 0) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.EditNote, null, modifier = Modifier.size(8.dp), tint = colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                        Spacer(Modifier.width(2.dp))
+                        Text("$fileChangeCount", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                    }
+                }
+
                 // Context tokens
                 if (state.contextTokens != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

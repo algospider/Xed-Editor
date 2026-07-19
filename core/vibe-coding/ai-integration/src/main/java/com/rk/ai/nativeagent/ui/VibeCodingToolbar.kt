@@ -9,16 +9,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.google.gson.JsonObject
 import com.rk.ai.nativeagent.engine.VibeCodingEngine
 import com.rk.ai.nativeagent.engine.VibeCodingState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlin.uuid.ExperimentalUuidApi
 
-private enum class OverflowAction {
-    SKILLS, AGENTS, RULES, PLUGINS, PERMS, CLEAR, EXPORT
-}
+/** Editor context snapshot polled from ideService. */
+private data class EditorContext(
+    val fileName: String = "",
+    val selectionLength: Int = 0,
+    val selectionSnippet: String = "",
+)
 
 @Composable
 internal fun VibeCodingToolbar(
@@ -36,13 +45,40 @@ internal fun VibeCodingToolbar(
     val colorScheme = MaterialTheme.colorScheme
     var showOverflow by remember { mutableStateOf(false) }
 
+    // Poll editor context for the current file and selection
+    val editorCtx = produceState(initialValue = EditorContext()) {
+        while (isActive) {
+            val ctx = withContext(Dispatchers.IO) {
+                try {
+                    val activeFile = engine.ideService.getActiveFile()
+                    val fileName = activeFile?.get("name")?.asString
+                        ?: activeFile?.get("path")?.asString?.substringAfterLast("/")
+                        ?: ""
+                    val selection = withContext(Dispatchers.Main) { engine.ideService.getSelection() }
+                    EditorContext(
+                        fileName = fileName,
+                        selectionLength = selection.length,
+                        selectionSnippet = selection.take(60),
+                    )
+                } catch (_: Exception) {
+                    EditorContext()
+                }
+            }
+            value = ctx
+            kotlinx.coroutines.delay(2000) // poll every 2s
+        }
+    }.value
+
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
+    val isCompact = screenWidthDp < 360.dp
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = colorScheme.surfaceContainerLow,
         tonalElevation = 0.5.dp,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Model badge
@@ -67,11 +103,58 @@ internal fun VibeCodingToolbar(
                     color = colorScheme.primary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 100.dp).padding(horizontal = 8.dp, vertical = 3.dp),
+                    modifier = Modifier.widthIn(max = if (isCompact) 60.dp else 100.dp).padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
 
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(4.dp))
+
+            // Editor file context chip
+            if (editorCtx.fileName.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(10.dp),
+                            tint = colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Text(
+                            text = editorCtx.fileName,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.widthIn(max = if (isCompact) 60.dp else 110.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(4.dp))
+            }
+
+            // Selection badge
+            if (editorCtx.selectionLength > 0) {
+                Surface(
+                    shape = RoundedCornerShape(3.dp),
+                    color = colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                ) {
+                    Text(
+                        text = "${editorCtx.selectionLength} chars",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                        fontWeight = FontWeight.Medium,
+                        color = colorScheme.onTertiaryContainer,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+            }
 
             // Files toggle
             ToolbarIconButton(
@@ -167,14 +250,14 @@ private fun ToolbarIconButton(
 
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(6.dp),
         color = bg,
-        modifier = Modifier.padding(2.dp),
+        modifier = Modifier.padding(1.dp),
     ) {
         Icon(
             icon,
             contentDescription = label,
-            modifier = Modifier.size(20.dp).padding(2.dp),
+            modifier = Modifier.size(18.dp).padding(2.dp),
             tint = if (isActive) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
         )
     }

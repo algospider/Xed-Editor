@@ -2,16 +2,13 @@
 
 package com.rk.ai.agent.tools
 
-import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import kotlin.uuid.ExperimentalUuidApi
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.json.putJsonArray
-import com.rk.ai.agent.RecoveryHint
-import com.rk.ai.agent.deriveRecoveryHint
+// Utility methods moved to FileToolUtils
 import com.rk.ai.models.InputSchema
 import com.rk.ai.models.Tool
 import com.rk.ai.models.UIMessagePart
@@ -22,108 +19,6 @@ class VibeCodingFileTools(
     private val ideService: IdeService,
     private val fileContentCache: FileContentCache = FileContentCache(),
 ) {
-    companion object {
-        private fun extractPath(obj: com.google.gson.JsonObject): String? {
-            return obj["path"]?.asJsonPrimitive?.asString
-                ?: obj["filePath"]?.asJsonPrimitive?.asString
-                ?: obj["file"]?.asJsonPrimitive?.asString
-                ?: obj["sourcePath"]?.asJsonPrimitive?.asString
-                ?: obj["destPath"]?.asJsonPrimitive?.asString
-                ?: obj["outputPath"]?.asJsonPrimitive?.asString
-                ?: obj["target"]?.asJsonPrimitive?.asString
-        }
-
-        private fun pathNotFoundError(rawPath: String, workspacePath: String?): String {
-            val ws = workspacePath?.takeIf { it.isNotBlank() } ?: "none"
-            return "ERROR: Path could not be resolved: '$rawPath'\n" +
-                "Workspace: $ws\n" +
-                "SUGGESTION: Use an absolute path or a path relative to workspace root. " +
-                "Call getProjectStructure or listFiles to verify the path exists."
-        }
-
-        private fun buildWorkspaceMsg(ideService: IdeService): String {
-            val ws = ideService.getPrimaryWorkspacePath()
-            return ws.takeIf { it.isNotBlank() }?.let { "Workspace: $it" } ?: "No workspace configured"
-        }
-
-        fun parseFilePaths(element: com.google.gson.JsonElement?): List<String> {
-            if (element == null) return emptyList()
-            if (element is JsonArray) {
-                return element.mapNotNull { it.asJsonPrimitive?.asString?.trim() }.filter { it.isNotBlank() }
-            }
-            val raw = element.asJsonPrimitive?.asString?.trim() ?: return emptyList()
-            if (raw.isBlank()) return emptyList()
-            if (raw.startsWith("[")) {
-                return runCatching {
-                    val arr = JsonParser.parseString(raw).asJsonArray
-                    arr.mapNotNull { it.asJsonPrimitive?.asString?.trim() }.filter { it.isNotBlank() }
-                }.getOrDefault(
-                    raw.removeSurrounding("[", "]").split(",").map { it.trim().removeSurrounding("\"") }.filter { it.isNotBlank() }
-                )
-            }
-            return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
-        }
-
-        private fun countMatches(text: String, search: String): Int {
-            var count = 0
-            var idx = 0
-            while (true) {
-                idx = text.indexOf(search, idx)
-                if (idx == -1) break
-                count++
-                idx += search.length
-            }
-            return count
-        }
-
-        private fun buildRecoveryMsg(error: String, toolName: String): String? {
-            val hint = deriveRecoveryHint(toolName, error)
-            return if (hint != null) "[RECOVERY] $error. ${hint.message}" else null
-        }
-
-        /**
-         * Creates a minimal unified-diff-like preview string for human review.
-         * Shows context lines around changes in a compact format.
-         */
-        fun createUnifiedDiff(fileName: String, oldContent: String, newContent: String): String {
-            val oldLines = oldContent.lines()
-            val newLines = newContent.lines()
-            val diff = StringBuilder()
-            diff.appendLine("--- a/$fileName")
-            diff.appendLine("+++ b/$fileName")
-
-            val CONTEXT_LINES = 2
-            var idx = 0
-            while (idx < oldLines.size || idx < newLines.size) {
-                if (idx < oldLines.size && idx < newLines.size && oldLines[idx] == newLines[idx]) {
-                    idx++
-                    continue
-                }
-                // Found a change — collect the hunk
-                val startOld = (idx - CONTEXT_LINES).coerceAtLeast(0)
-                val startNew = (idx - CONTEXT_LINES).coerceAtLeast(0)
-                var endOld = (idx + CONTEXT_LINES).coerceAtMost(oldLines.size)
-                var endNew = (idx + CONTEXT_LINES).coerceAtMost(newLines.size)
-
-                // Extend to include all contiguous changed lines
-                while (endOld < oldLines.size || endNew < newLines.size) {
-                    if (endOld < oldLines.size && endNew < newLines.size && oldLines[endOld] == newLines[endNew]) break
-                    if (endOld < oldLines.size) endOld++
-                    if (endNew < newLines.size) endNew++
-                }
-
-                diff.appendLine("@@ -${startOld + 1},${endOld - startOld} +${startNew + 1},${endNew - startNew} @@")
-                for (i in startOld until endOld) {
-                    if (i < oldLines.size) diff.appendLine("-${oldLines[i]}") else diff.appendLine("-")
-                }
-                for (i in startNew until endNew) {
-                    if (i < newLines.size) diff.appendLine("+${newLines[i]}") else diff.appendLine("+")
-                }
-                idx = maxOf(endOld, endNew)
-            }
-            return diff.toString().ifEmpty { "(no changes)" }
-        }
-    }
 
     private val readFile = Tool(
         name = "readFile",
@@ -143,12 +38,12 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val rawPath = extractPath(obj)
+            val rawPath = FileToolUtils.extractPath(obj)
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'path' argument.\nSUGGESTION: Provide an absolute or workspace-relative path, e.g. {\"path\": \"src/main.kt\"}"))
             val startLine = obj["startLine"]?.asJsonPrimitive?.asInt
             val endLine = obj["endLine"]?.asJsonPrimitive?.asInt
             val resolved = ideService.resolvePath(rawPath)
-            if (resolved == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(rawPath, ideService.getPrimaryWorkspacePath())))
+            if (resolved == null) return@Tool listOf(UIMessagePart.Text(FileToolUtils.pathNotFoundError(rawPath, ideService.getPrimaryWorkspacePath())))
             val filePath = resolved.absolutePath
 
             if (startLine == null && endLine == null) {
@@ -189,7 +84,7 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val paths = parseFilePaths(obj["filePaths"])
+            val paths = FileToolUtils.parseFilePaths(obj["filePaths"])
             if (paths.isEmpty()) return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePaths argument.\nEXPECTED: {\"filePaths\": [\"file1.kt\", \"file2.kt\"]}"))
             val results = paths.map { rawPath ->
                 val resolved = ideService.resolvePath(rawPath)
@@ -224,19 +119,19 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val path = extractPath(obj)
+            val path = FileToolUtils.extractPath(obj)
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath' or 'path' argument.\nEXPECTED: {\"filePath\": \"src/main.kt\", \"content\": \"...\"}"))
             val content = obj["content"]?.asJsonPrimitive?.asString
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'content' argument.\nEXPECTED: {\"filePath\": \"src/main.kt\", \"content\": \"...\"}"))
             val showDiff = obj["showDiff"]?.asJsonPrimitive?.asBoolean ?: false
             val file = ideService.resolvePath(path)
-            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(path, ideService.getPrimaryWorkspacePath())))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(FileToolUtils.pathNotFoundError(path, ideService.getPrimaryWorkspacePath())))
             try {
                 file.parentFile?.mkdirs()
                 // Show diff preview before overwriting an existing file
                 if (showDiff && file.exists()) {
                     val oldContent = file.readText()
-                    val patch = createUnifiedDiff(file.name, oldContent, content)
+                    val patch = FileToolUtils.createUnifiedDiff(file.name, oldContent, content)
                     ideService.showPatch(file.absolutePath, oldContent, content, "writeFile: ${file.name}") { }
                     listOf(UIMessagePart.Text("Diff shown for $path. Use getDiffResult after user review.\nPreview:\n$patch"))
                 } else {
@@ -245,7 +140,7 @@ class VibeCodingFileTools(
                     listOf(UIMessagePart.Text("OK ${file.absolutePath} (${content.length} bytes)"))
                 }
             } catch (e: Exception) {
-                val hint = buildRecoveryMsg(e.message ?: "Write failed", "writeFile")
+                val hint = FileToolUtils.buildRecoveryMsg(e.message ?: "Write failed", "writeFile")
                 listOf(UIMessagePart.Text("ERROR: Failed to write $path: ${e.message}${hint?.let { "\n$it" } ?: ""}"))
             }
         },
@@ -256,6 +151,9 @@ class VibeCodingFileTools(
         description = "Surgical find-and-replace in a file. " +
             "PROVIDE ENOUGH CONTEXT in oldString for a UNIQUE match (include surrounding lines). " +
             "Use replaceAll=true to replace all occurrences. " +
+            "ALWAYS read the file FIRST to get the exact text before editing. " +
+            "If editFile keeps failing to find oldString, the text has changed — re-read the file and use the EXACT current content. " +
+            "As last resort, use writeFile to overwrite the whole file. " +
             "Use editFile instead of writeFile when you only need to change a small portion of a file. " +
             "For multiple edits in one file, use multiEditFile. " +
             "For read+edit in one call, use readAndEdit. " +
@@ -273,7 +171,7 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = extractPath(obj)
+            val filePath = FileToolUtils.extractPath(obj)
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'filePath' or 'path'."))
             val oldString = obj["oldString"]?.asJsonPrimitive?.asString
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'oldString'."))
@@ -281,13 +179,13 @@ class VibeCodingFileTools(
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'newString'."))
             val replaceAll = obj["replaceAll"]?.asJsonPrimitive?.asBoolean ?: false
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(FileToolUtils.pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
             val resolvedPath = file.absolutePath
 
             val content = ideService.getFileContent(resolvedPath, null, null)
             if (content == null) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: $resolvedPath\nSUGGESTION: Verify the file exists with listFiles."))
 
-            val matchCount = countMatches(content, oldString)
+            val matchCount = FileToolUtils.countMatches(content, oldString)
             if (matchCount == 0) {
                 // Fuzzy fallback: try whitespace-normalized matching
                 val fuzzyResult = fuzzyFindAndReplace(content, oldString, newString, replaceAll)
@@ -340,13 +238,13 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath or path"))
+            val filePath = FileToolUtils.extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath or path"))
             val oldString = obj["oldString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing oldString"))
             val newString = obj["newString"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing newString"))
             val replaceAll = obj["replaceAll"]?.asJsonPrimitive?.asBoolean ?: false
 
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(FileToolUtils.pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
             val resolvedPath = file.absolutePath
 
             val cached = fileContentCache.get(resolvedPath)
@@ -354,7 +252,7 @@ class VibeCodingFileTools(
             if (content == null) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: $resolvedPath"))
             if (cached == null) fileContentCache.put(resolvedPath, content)
 
-            val matchCount = countMatches(content, oldString)
+            val matchCount = FileToolUtils.countMatches(content, oldString)
             if (matchCount == 0) return@Tool listOf(UIMessagePart.Text("ERROR: Text not found in $resolvedPath. Ensure exact whitespace matching."))
             if (matchCount > 1 && !replaceAll) return@Tool listOf(UIMessagePart.Text("ERROR: Found $matchCount matches. Use replaceAll=true or add more context."))
 
@@ -397,10 +295,10 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath or path"))
+            val filePath = FileToolUtils.extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing filePath or path"))
             val editsArr = obj["edits"]?.asJsonArray ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing edits array"))
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(FileToolUtils.pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
             var content = ideService.getFileContent(file.absolutePath, null, null)
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: File not found: ${file.absolutePath}"))
             var successCount = 0
@@ -410,7 +308,7 @@ class VibeCodingFileTools(
                 val oldString = editObj["oldString"]?.asJsonPrimitive?.asString ?: ""
                 val newString = editObj["newString"]?.asJsonPrimitive?.asString ?: ""
                 if (oldString.isEmpty()) continue
-                val mc = countMatches(content, oldString)
+                val mc = FileToolUtils.countMatches(content, oldString)
                 if (mc == 0) errors.add("Edit ${i+1}: Text not found (check whitespace): ${oldString.take(80)}...")
                 else if (mc > 1) errors.add("Edit ${i+1}: Found $mc matches. Add more context: ${oldString.take(80)}...")
                 else { content = content.replaceFirst(oldString, newString); successCount++ }
@@ -477,11 +375,11 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = extractPath(obj)
+            val filePath = FileToolUtils.extractPath(obj)
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing required 'filePath' or 'path'."))
             val content = obj["content"]?.asJsonPrimitive?.asString ?: ""
             val file = ideService.resolvePath(filePath)
-            if (file == null) return@Tool listOf(UIMessagePart.Text(pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
+            if (file == null) return@Tool listOf(UIMessagePart.Text(FileToolUtils.pathNotFoundError(filePath, ideService.getPrimaryWorkspacePath())))
             if (file.exists()) return@Tool listOf(UIMessagePart.Text("ERROR: File already exists: $filePath\nSUGGESTION: Use writeFile to overwrite, or choose a different path."))
             try {
                 file.parentFile?.mkdirs()
@@ -509,7 +407,7 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val filePath = extractPath(obj)
+            val filePath = FileToolUtils.extractPath(obj)
                 ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'filePath' or 'path'."))
             val file = ideService.resolvePath(filePath)
             if (file == null || !file.exists()) return@Tool listOf(UIMessagePart.Text("ERROR: File not found: $filePath\nSUGGESTION: Verify the path with listFiles."))
@@ -650,7 +548,7 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val rawPath = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
+            val rawPath = FileToolUtils.extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
             val n = (obj["lines"]?.asJsonPrimitive?.asInt ?: 10).coerceIn(1, 10000)
             val resolved = ideService.resolvePath(rawPath)
             if (resolved == null) return@Tool listOf(UIMessagePart.Text("ERROR: Could not resolve path: $rawPath"))
@@ -682,7 +580,7 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val path = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
+            val path = FileToolUtils.extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
             val file = ideService.resolvePath(path)
             if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $path"))
             var text = fileContentCache.get(file.absolutePath)
@@ -716,7 +614,7 @@ class VibeCodingFileTools(
         },
         execute = { args ->
             val obj = args.asJsonObject
-            val path = extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
+            val path = FileToolUtils.extractPath(obj) ?: return@Tool listOf(UIMessagePart.Text("ERROR: Missing 'path'."))
             val file = ideService.resolvePath(path)
             if (file == null) return@Tool listOf(UIMessagePart.Text("ERROR: Path could not be resolved: $path"))
             val exists = file.exists()
@@ -788,12 +686,4 @@ class VibeCodingFileTools(
         readFile, readFiles, readAndEdit, writeFile, editFile, multiEditFile, applyBatchEdits,
         createFile, deleteFile, renameFile, listFiles, findFiles, tail, wc, stat,
     )
-
-    private fun humanReadableSize(bytes: Long): String {
-        if (bytes < 1024) return "$bytes B"
-        val units = arrayOf("KB", "MB", "GB", "TB")
-        var size = bytes.toDouble()
-        for (unit in units) { size /= 1024.0; if (size < 1024.0) return "%.1f %s".format(size, unit) }
-        return "%.1f PB".format(size)
-    }
 }

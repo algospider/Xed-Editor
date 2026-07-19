@@ -38,6 +38,7 @@ fun VibeCodingMessageList(
     onAnswerTool: ((String, String) -> Unit)? = null,
     onCopyMessage: ((String) -> Unit)? = null,
     onDeleteMessage: ((Int) -> Unit)? = null,
+    onApplyCode: ((String, String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -52,20 +53,20 @@ fun VibeCodingMessageList(
         }
     }
 
-    // Scroll to bottom when new messages arrive (only if already near bottom)
+    // Scroll to bottom when new messages arrive (only if already near bottom).
+    // Also scrolls on first composition after layout has settled.
+    val initialScrollDone = remember { mutableStateOf(false) }
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty() && isNearBottom) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
-    }
-
-    // Force scroll to bottom on first composition (panel re-entry)
-    val lastMessageId = messages.lastOrNull()?.id ?: ""
-    LaunchedEffect(lastMessageId) {
         if (messages.isNotEmpty()) {
-            // Small delay to let layout settle, then snap to bottom
-            kotlinx.coroutines.delay(50)
-            listState.scrollToItem(messages.size - 1)
+            if (isNearBottom) {
+                listState.animateScrollToItem(messages.size - 1)
+                initialScrollDone.value = true
+            } else if (!initialScrollDone.value) {
+                // First composition — scroll to bottom after layout settles
+                kotlinx.coroutines.delay(50)
+                listState.scrollToItem(messages.size - 1)
+                initialScrollDone.value = true
+            }
         }
     }
 
@@ -86,6 +87,7 @@ fun VibeCodingMessageList(
                     onDelete = if (msgIndex >= 0 && onDeleteMessage != null) {
                         { onDeleteMessage(msgIndex) }
                     } else null,
+                    onApplyCode = onApplyCode,
                 )
             }
 

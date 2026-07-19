@@ -44,15 +44,25 @@ data class IndexResult(
 
 class ProjectIndexer(private val ideService: IdeService) {
 
+    /** Timestamp of the last full index for change detection. */
+    private var lastIndexTime: Long = 0L
+
+    /** Cached file list so [reindexChanged] can diff against it. */
+    private var knownFiles: Map<String, ScannedFile> = emptyMap()
+
+    /** Most-recent full index result, used for incremental updates. */
+    private var cachedIndex: IndexResult? = null
+
     /**
-     * Full project index using parallel scanning for each dimension.
-     * All five scans run concurrently for maximum throughput.
+     * Full project index with all five dimensions scanned concurrently.
+     *
+     * After the first call, [reindexChanged] should be preferred for
+     * subsequent indexing operations to avoid re-scanning unchanged files.
      */
     suspend fun index(workspacePath: String): IndexResult = coroutineScope {
         val filesDeferred = async { scanFiles(workspacePath) }
         val modulesDeferred = async { scanModules(workspacePath) }
         val symbolsDeferred = async {
-            // Symbol scanning depends on files, so we pass the deferred result
             val files = filesDeferred.await()
             scanSymbols(files)
         }
@@ -62,17 +72,80 @@ class ProjectIndexer(private val ideService: IdeService) {
             scanPackageStructure(files)
         }
 
-        IndexResult(
-            files = filesDeferred.await(),
+        val files = filesDeferred.await()
+        lastIndexTime = System.currentTimeMillis()
+        knownFiles = files.associateBy { it.path }
+
+        val result = IndexResult(
+            files = files,
             modules = modulesDeferred.await(),
             symbols = symbolsDeferred.await(),
             dependencies = depsDeferred.await(),
             packageStructure = pkgDeferred.await(),
         )
+        cachedIndex = result
+        result
     }
 
     /**
-     * Parallel file scanning across all extensions at once.
+     * Incremental re-index that only scans files changed since the last index.
+     *
+     * Returns the most recent complete [IndexResult] — either a merged delta
+     * from the cache plus changed files, or the cached index directly when
+     * nothing has changed. This is safe to call on every symbol-search or
+     * stats query without a full re-scan.
+     *
+     * @return the current [IndexResult] (never null after first [index] call).
+     */
+    suspend fun reindexChanged(workspacePath: String): IndexResult = coroutineScope {
+        val cached = cachedIndex
+        if (cached == null || lastIndexTime == 0L) {
+            return@coroutineScope index(workspacePath)
+        }
+
+        // Lightweight: scan file list only
+        val currentFiles = scanFiles(workspacePath)
+        val changedFiles = currentFiles.filter { file ->
+            val known = knownFiles[file.path]
+            known == null || known.lastModified != file.lastModified || known.size != file.size
+        }
+
+        if (changedFiles.isEmpty() && currentFiles.size == knownFiles.size) {
+            Log.i(TAG, "No file changes since last index — returning cached result")
+            return@coroutineScope cached
+        }
+
+        Log.i(TAG, "Re-indexing ${changedFiles.size} changed files (${currentFiles.size} total)")
+        lastIndexTime = System.currentTimeMillis()
+        knownFiles = currentFiles.associateBy { it.path }
+
+        // Only re-scan what changed; keep the rest from cache
+        val changedPaths = changedFiles.map { it.path }.toSet()
+
+        val newSymbols = if (changedFiles.isNotEmpty()) {
+            val fresh = scanSymbols(changedFiles)
+            // Merge: keep cached symbols from unchanged files, add new ones
+            val cachedSymbols = cached.symbols.filter { it.file !in changedPaths }
+            cachedSymbols + fresh
+        } else cached.symbols
+
+        val newPkgStructure = if (changedFiles.any { it.path.endsWith(".kt") || it.path.endsWith(".java") }) {
+            scanPackageStructure(currentFiles)
+        } else cached.packageStructure
+
+        val result = IndexResult(
+            files = currentFiles,
+            modules = cached.modules, // modules rarely change
+            symbols = newSymbols,
+            dependencies = cached.dependencies, // deps rarely change
+            packageStructure = newPkgStructure,
+        )
+        cachedIndex = result
+        result
+    }
+
+    /**
+     * Parallel file scanning grouped by extension.
      */
     private suspend fun scanFiles(path: String): List<ScannedFile> = supervisorScope {
         val extensions = listOf(
@@ -121,7 +194,13 @@ class ProjectIndexer(private val ideService: IdeService) {
     }
 
     /**
-     * Parallel symbol scanning across files using coroutines.
+     * Scans symbols across files with priority ordering.
+     *
+     * Files are prioritized so that, within the MAX cap, the most useful
+     * symbols are extracted first:
+     *   1. Source code files (.kt, .java) — highest priority
+     *   2. Recently modified files (latest first)
+     *   3. Smaller files first (faster to parse)
      */
     private suspend fun scanSymbols(files: List<ScannedFile>): List<SymbolInfo> = supervisorScope {
         val patterns = listOf(
@@ -131,10 +210,23 @@ class ProjectIndexer(private val ideService: IdeService) {
             Regex("""^var\s+(\w+)\s""", RegexOption.MULTILINE),
         )
 
-        val MAX_SYMBOL_FILES = 200
+        val MAX_SYMBOL_FILES = 500
         val MAX_FILE_SIZE = 500_000L
 
-        files.take(MAX_SYMBOL_FILES)
+        // Priority scoring: higher = more likely to contain useful symbols
+        fun priority(file: ScannedFile): Int {
+            val ext = file.path.substringAfterLast(".")
+            val sourceBonus = if (ext in setOf("kt", "java", "kts")) 100 else 0
+            val sizePenalty = when {
+                file.size > MAX_FILE_SIZE -> -50
+                file.size > 200_000 -> -10
+                else -> 0
+            }
+            return sourceBonus + sizePenalty
+        }
+
+        files.sortedByDescending { priority(it) }
+            .take(MAX_SYMBOL_FILES)
             .filter { it.size <= MAX_FILE_SIZE }
             .chunked(20) // process 20 files in parallel per batch
             .flatMap { batch ->
@@ -181,7 +273,7 @@ class ProjectIndexer(private val ideService: IdeService) {
     }
 
     /**
-     * Parallel package-structure scanning.
+     * Package-structure scanning with parallel batches.
      */
     private suspend fun scanPackageStructure(files: List<ScannedFile>): Map<String, List<String>> = supervisorScope {
         val sourceFiles = files.filter { it.path.endsWith(".kt") || it.path.endsWith(".java") }

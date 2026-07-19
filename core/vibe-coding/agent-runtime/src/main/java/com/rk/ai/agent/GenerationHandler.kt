@@ -96,8 +96,10 @@ class GenerationHandler(
         try {
         // Per-call state — reset for each generateText() invocation to prevent bleed between sessions
         var compactionCount = 0
+        var generationSummary: String? = null
         var previousToolCalls: List<Pair<String, String>> = emptyList()
         var lastFinishReason: String? = null
+        selfReviewer.resetTracking()
         // Pattern-based doom loop detection: track recent tool name sequences
         val recentToolNameSequences = mutableListOf<List<String>>()
         val PATTERN_WINDOW = 6 // detect patterns across this many steps
@@ -128,8 +130,9 @@ class GenerationHandler(
                 if (compactionCount >= MAX_COMPACTIONS) {
                     Log.w(TAG, "Max compactions reached ($MAX_COMPACTIONS), cannot compact further")
                 } else {
-                    val compacted = compactMessages(messages, model)
+                    val (compacted, updatedSummary) = compactMessages(messages, model, generationSummary)
                     messages = compacted
+                    generationSummary = updatedSummary
                     compactionCount++
                     send(GenerationChunk.CompactionNeeded("context_overflow_after_step_$stepIndex"))
                     send(GenerationChunk.Messages(compacted))
@@ -238,8 +241,9 @@ class GenerationHandler(
                     if (hasLengthFinish) {
                         Log.w(TAG, "Model stopped with 'length' finish reason, compacting...")
                         if (compactionCount < MAX_COMPACTIONS) {
-                            val compacted = compactMessages(messages, model)
+                            val (compacted, updatedSummary) = compactMessages(messages, model, generationSummary)
                             messages = compacted
+                            generationSummary = updatedSummary
                             compactionCount++
                             send(GenerationChunk.CompactionNeeded("length_finish"))
                             send(GenerationChunk.Messages(compacted))
@@ -361,6 +365,7 @@ class GenerationHandler(
                         }
                         if (filePath != null) {
                             contextMemory?.recordEdit(filePath, et.toolName)
+                            selfReviewer.trackEdit(filePath, et.toolName)
                         }
                     }
                     is ExecutionState.Error -> {
@@ -368,6 +373,20 @@ class GenerationHandler(
                     }
                     else -> {}
                 }
+            }
+
+            // ── Cross-file consistency check ──────────────────────────
+            val crossFileReport = selfReviewer.crossFileConsistencyCheck()
+            if (!crossFileReport.passed) {
+                val checkMsg = UIMessage(
+                    role = MessageRole.SYSTEM,
+                    parts = listOf(UIMessagePart.Text(
+                        "[CROSS-FILE CHECK] ${crossFileReport.feedback.take(200)}"
+                    ))
+                )
+                messages = messages + checkMsg
+                send(GenerationChunk.Messages(messages))
+                contextMemory?.log("Cross-file: ${crossFileReport.feedback.take(100)}")
             }
 
             // Post-edit verification: if write tools were used, inject a verify hint
@@ -428,11 +447,11 @@ class GenerationHandler(
             }
             if (CompactionHandler.detectPatternLoop(recentToolNameSequences)) {
                 Log.w(TAG, "Pattern loop detected, injecting hint")
-                val toolsCalled = recentToolNameSequences.flatten().distinct().joinToString(", ")
+                val toolsCalled = recentToolNameSequences.flatten().distinct()
                 val recoveryMsg = CompactionHandler.buildRecoveryMessage(
                     loopType = "pattern_loop",
-                    toolName = toolsCalled,
-                    details = "Try a different approach."
+                    toolName = toolsCalled.joinToString(", "),
+                    details = CompactionHandler.buildPatternLoopDetails(toolsCalled)
                 )
                 messages = messages + recoveryMsg
                 send(GenerationChunk.Messages(messages))
@@ -441,12 +460,13 @@ class GenerationHandler(
             }
 
             // Excessive reads detection — soft hint, don't break the loop
-            if (CompactionHandler.detectExcessiveReads(messages)) {
-                Log.w(TAG, "Many file reads detected, injecting efficiency hint")
+            val excessiveReadCount = CompactionHandler.detectExcessiveReads(messages)
+            if (excessiveReadCount > 0) {
+                Log.w(TAG, "Many file reads detected ($excessiveReadCount reads), injecting efficiency hint")
                 val hintMsg = CompactionHandler.buildRecoveryMessage(
                     loopType = "excessive_reads",
                     toolName = "readFiles/readFile",
-                    details = "Consider batching reads with readFiles() instead of individual readFile() calls. Continue with your task."
+                    details = CompactionHandler.buildExcessiveReadsDetails(excessiveReadCount)
                 )
                 messages = messages + hintMsg
                 send(GenerationChunk.Messages(messages))
@@ -560,19 +580,19 @@ class GenerationHandler(
     private suspend fun compactMessages(
         messages: List<UIMessage>,
         model: Model,
-    ): List<UIMessage> {
+        currentSummary: String?,
+    ): Pair<List<UIMessage>, String?> {
         val hasOverflow = CompactionHandler.needsCompaction(messages, model.contextWindow, model.maxOutputTokens)
-        if (!hasOverflow) return messages
+        if (!hasOverflow) return messages to currentSummary
 
-        val compacted = CompactionHandler.pruneMessages(messages)
+        val compacted = CompactionHandler.pruneMessages(messages, compactionCount)
         if (compacted.compactedMessages.isNotEmpty() && compacted.prunedCount > 0) {
-            val previousSummary = CompactionHandler.getRunningSummary()
             val summaryText = buildString {
                 appendLine("[Compacted summary of earlier context]")
-                if (previousSummary != null) {
+                if (currentSummary != null) {
                     appendLine()
                     appendLine("--- Accumulated context from prior compactions ---")
-                    appendLine(previousSummary)
+                    appendLine(currentSummary)
                     appendLine("--- End accumulated context ---")
                     appendLine()
                 }
@@ -580,20 +600,42 @@ class GenerationHandler(
                 appendLine("The remaining context contains the most recent turns.")
                 appendLine("Tool outputs in the compacted portion have been truncated to save context.")
                 appendLine("If you need information from earlier in the conversation, check the accumulated context above.")
+
+                // Include project-level context when available so it survives compactions
+                val ctx = contextMemory
+                if (ctx != null) {
+                    val projectSummary = ctx.project.getCachedSummary()
+                    if (projectSummary.isNotBlank()) {
+                        appendLine()
+                        appendLine("Project: $projectSummary")
+                    }
+                    val facts = ctx.conversation.getRelevantFacts("")
+                    if (facts.isNotEmpty()) {
+                        appendLine()
+                        appendLine("Known facts:")
+                        facts.take(10).forEach { appendLine("  - $it") }
+                    }
+                    val recentLogs = ctx.working.getRecentLogs(20)
+                    val fileEdits = recentLogs.filter { it.contains("edit", ignoreCase = true) || it.contains("file", ignoreCase = true) }
+                    if (fileEdits.isNotEmpty()) {
+                        appendLine()
+                        appendLine("Recent file activity:")
+                        fileEdits.take(10).forEach { appendLine("  - $it") }
+                    }
+                }
             }
-            CompactionHandler.updateRunningSummary(summaryText)
             val summaryMsg = UIMessage(
                 role = MessageRole.SYSTEM,
                 parts = listOf(UIMessagePart.Text(summaryText)),
             )
             val tailMessages = messages.drop(compacted.compactedMessages.size)
-            return listOf(summaryMsg) + tailMessages
+            return listOf(summaryMsg) + tailMessages to summaryText
         }
 
         return TokenEstimator.truncateByTokens(
             messages,
             TokenEstimator.usableTokens(model.contextWindow, model.maxOutputTokens),
-        )
+        ) to currentSummary
     }
 
     private suspend fun executeSingleTool(

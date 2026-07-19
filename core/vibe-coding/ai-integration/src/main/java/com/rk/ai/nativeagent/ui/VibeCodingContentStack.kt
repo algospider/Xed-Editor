@@ -63,6 +63,9 @@ internal fun VibeCodingContentStack(
                         cm.setPrimaryClip(android.content.ClipData.newPlainText("VibeCoding", text))
                     },
                     onDeleteMessage = { index -> engine.deleteMessage(index) },
+                    onApplyCode = { code, _ ->
+                        engine.ideService.insertAtCursor(code)
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
