@@ -226,7 +226,7 @@ class ExecutionEngine(
                     " (recovery: ${recoveryAction.message})"
                 } else ""
 
-                if (recoveryAction != null && recoveryEngine.isRetryable(toolCall.name, e.message ?: "")) {
+                if (recoveryAction != null && com.rk.ai.agent.RecoveryEngine.isRetryable(toolCall.name, e.message ?: "")) {
                     val recovered = recoveryEngine.executeRecovery(recoveryAction)
                     if (recovered && recoveryEngine.shouldRetryAfterRecovery(recoveryAction)) {
                         contextMemory.log("Recovery succeeded, retrying ${toolCall.name}")
