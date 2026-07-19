@@ -4,16 +4,12 @@ package com.rk.ai.nativeagent.engine
 import android.content.Context
 import android.util.Log
 import androidx.room.Room
-import com.rk.ai.agent.GenerationChunk
 import com.rk.ai.agent.AILoggingManager
 import com.rk.ai.agent.AppEventBus
 import com.rk.ai.agent.GenerationHandler
 import com.rk.ai.agent.events.SessionTodo
-import com.rk.ai.agent.events.SessionTodoStatus
 import com.rk.ai.agent.events.VibeCodingEvent
 import com.rk.ai.agent.events.VibeCodingEventBus
-import com.rk.ai.agent.files.CommandFileLoader
-import com.rk.ai.agent.files.CommandDefinition
 import com.rk.ai.agent.files.ConfigProvider
 import com.rk.ai.agent.files.DefaultContentSeeder
 import com.rk.ai.agent.files.FilesManager
@@ -21,8 +17,6 @@ import com.rk.ai.agent.files.SkillManager
 import com.rk.ai.agent.executor.AgentOrchestrator
 import com.rk.ai.agent.executor.AgentPhase
 import com.rk.ai.agent.executor.ExecutionEngine
-import com.rk.ai.agent.files.UnifiedConfig
-import com.rk.ai.agent.files.XedConfig
 import com.rk.ai.agent.files.XedConfigLoader
 import com.rk.ai.agent.indexer.ProjectIndexer
 import com.rk.ai.agent.tools.ToolValidator
@@ -35,34 +29,24 @@ import com.rk.ai.agent.hooks.SecurityHook
 import com.rk.ai.agent.tools.LocalTools
 import com.rk.ai.agent.tools.ToolCache
 import com.rk.ai.agent.tools.ToolRouter
-import com.rk.ai.agent.tools.VibeCodingSystemTools
 import com.rk.ai.agent.tools.VibeCodingToolRegistry
 import com.rk.ai.agent.transformers.Base64ImageToLocalFileTransformer
-import com.rk.ai.agent.transformers.InputMessageTransformer
 import com.rk.ai.agent.transformers.PlaceholderTransformer
 import com.rk.ai.agent.transformers.PromptInjectionTransformer
 import com.rk.ai.agent.transformers.RegexOutputTransformer
 import com.rk.ai.agent.transformers.TimeReminderTransformer
 import com.rk.ai.agent.transformers.ToolTagSanitizerTransformer
-import com.rk.ai.agent.transformers.TransformerContext
-import com.rk.ai.agent.tools.createSearchTools
-import com.rk.ai.agent.tools.createSkillTools
 import com.rk.ai.agent.tools.SuggestionStore
 import com.rk.ai.agent.agents.AgentRegistry
 import com.rk.ai.agent.context.ContextMemoryManager
 import com.rk.ai.agent.plan.PlanManager
-import com.rk.ai.agent.planner.TaskPlanner
 import com.rk.ai.core.AppScope
-import com.rk.ai.mcp.FileManager
 import com.rk.ai.mcp.McpManager
-import com.rk.ai.models.InputSchema
-import com.rk.ai.models.McpTool
 import com.rk.ai.models.Tool
 import com.rk.ai.models.ToolApprovalState
 import com.rk.ai.core.MessageRole
 import com.rk.ai.models.UIMessage
 import com.rk.ai.models.UIMessagePart
-import com.rk.ai.models.toMessageNode
 import com.rk.ai.persistence.db.AppDatabase
 import com.rk.ai.persistence.db.fts.MessageFtsManager
 import com.rk.ai.persistence.repo.ConversationRepository
@@ -77,21 +61,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -122,6 +97,10 @@ private fun registerShutdownHookForDatabase(db: AppDatabase) {
     }
 }
 
+/**
+ * Central facade for the vibe-coding AI engine. Owns all dependencies and
+ * delegates specialized operations to focused sub-modules.
+ */
 class VibeCodingEngine(
     private val context: Context,
     val ideService: IdeService,
@@ -136,7 +115,7 @@ class VibeCodingEngine(
 
     val database = buildDatabase(context)
     private val memoryRepo = MemoryRepository(database.memoryDao())
-    private val conversationRepo = ConversationRepository(
+    val conversationRepo = ConversationRepository(
         conversationDAO = database.conversationDao(),
         messageNodeDAO = database.messageNodeDao(),
         favoriteDAO = database.favoriteDao(),
@@ -173,20 +152,6 @@ class VibeCodingEngine(
     val hookManager = HookManager()
     val permissionManager = PermissionManager()
 
-    val generationPipeline = GenerationPipeline(
-        generationHandler = generationHandler,
-        permissionManager = permissionManager,
-        vibeEventBus = vibeEventBus,
-        engineScope = engineScope,
-        onStateUpdate = { transform ->
-            _state.value = _state.value.transform()
-            updateDebugInfo()
-        },
-        onSaveSession = { saveCurrentSessionMessages() },
-        onSaveConversation = suspend { saveConversation() },
-        getState = { _state.value },
-    )
-
     val toolCache = ToolCache()
     val toolRouter = ToolRouter(toolCache, null)
     val projectIndexer = ProjectIndexer(ideService)
@@ -220,6 +185,56 @@ class VibeCodingEngine(
         projectIndexer = projectIndexer,
     )
 
+    val configProvider = ConfigProvider(
+        context = context,
+        settingsStore = settingsStore,
+        workspacePath = { ideService.getPrimaryWorkspacePath() },
+        scope = engineScope,
+    )
+
+    private val toolValidator = ToolValidator()
+
+    // Sub-modules
+    private val systemPromptBuilder = SystemPromptBuilder(ideService)
+    val systemPromptTransformer = SystemPromptTransformer(systemPromptBuilder)
+
+    private val configManager = EngineConfigManager(
+        context = context,
+        ideService = ideService,
+        permissionManager = permissionManager,
+        systemPromptBuilder = systemPromptBuilder,
+        hookManager = hookManager,
+        updateState = { transform -> _state.value = _state.value.transform(); updateDebugInfo() },
+    )
+
+    private val toolDefinitions = VibeCodingToolDefinitions(
+        getState = { _state.value },
+        updateState = { transform -> _state.value = _state.value.transform(); updateDebugInfo() },
+        getCommandCatalog = { configManager.getCommandCatalog() },
+        engineScope = engineScope,
+        vibeEventBus = vibeEventBus,
+        mcpManager = mcpManager,
+        toolRegistry = toolRegistry,
+        localTools = localTools,
+        settingsStore = settingsStore,
+        skillManager = skillManager,
+        configProvider = configProvider,
+        permissionManager = permissionManager,
+        toolValidator = toolValidator,
+        json = json,
+    )
+
+    private val sessionManager = SessionManager(
+        getState = { _state.value },
+        updateState = { transform -> _state.value = _state.value.transform(); updateDebugInfo() },
+        conversationRepo = conversationRepo,
+        engineScope = engineScope,
+        vibeEventBus = vibeEventBus,
+        getCurrentAssistantId = ::getCurrentAssistantId,
+        getCommandCatalogSnapshot = { configManager.getCommandCatalog() },
+        getPermissionRulesSnapshot = { permissionManager.rules },
+    )
+
     val agentRegistry = AgentRegistry(context, ideService, providerManager, settingsStore) { prompt, contextStr ->
         this@VibeCodingEngine.generateWithLLM(
             prompt = prompt,
@@ -232,17 +247,19 @@ class VibeCodingEngine(
         )
     }
 
-    private val storedCommandCatalog = mutableListOf<CommandCatalogEntry>()
-    private var xedConfig = XedConfig()
-    private val toolValidator = ToolValidator()
-    val configProvider = ConfigProvider(
-        context = context,
-        settingsStore = settingsStore,
-        workspacePath = { ideService.getPrimaryWorkspacePath() },
-        scope = engineScope,
+    val generationPipeline = GenerationPipeline(
+        generationHandler = generationHandler,
+        permissionManager = permissionManager,
+        vibeEventBus = vibeEventBus,
+        engineScope = engineScope,
+        onStateUpdate = { transform ->
+            _state.value = _state.value.transform()
+            updateDebugInfo()
+        },
+        onSaveSession = { sessionManager.saveCurrentSessionMessages() },
+        onSaveConversation = suspend { sessionManager.saveConversation() },
+        getState = { _state.value },
     )
-
-    private var sessionCounter = 0L
 
     private val _state = MutableStateFlow(VibeCodingState())
     val state: StateFlow<VibeCodingState> = _state.asStateFlow()
@@ -253,11 +270,11 @@ class VibeCodingEngine(
             permissionAutoRespondRules = permissionManager.rules,
         )
         configProvider.unifiedConfig.value.let { cfg ->
-            applyPermissionRules(cfg)
+            configManager.applyPermissionRules(cfg)
         }
         engineScope.launch {
             configProvider.unifiedConfig.collect { cfg ->
-                applyPermissionRules(cfg)
+                configManager.applyPermissionRules(cfg)
             }
         }
         engineScope.launch {
@@ -288,8 +305,8 @@ class VibeCodingEngine(
         }
 
         DefaultContentSeeder.seedIfNeeded(context)
-        loadFileCommandsIntoCatalog()
-        loadProjectConfig()
+        configManager.loadFileCommandsIntoCatalog()
+        configManager.loadProjectConfig()
 
         orchestrator.setPhaseChangeListener { phase ->
             _state.value = _state.value.copy(currentPhase = phase)
@@ -303,8 +320,8 @@ class VibeCodingEngine(
                     val path = ideService.getPrimaryWorkspacePath()
                     if (path.isNotBlank()) {
                         _state.value = _state.value.copy(workspacePath = path)
-                        xedConfig = XedConfigLoader.loadConfig(path)
-                        applyConfigPermissions()
+                        configManager.xedConfig = XedConfigLoader.loadConfig(path)
+                        configManager.applyConfigPermissions()
                         break
                     }
                 } catch (_: Exception) { }
@@ -312,121 +329,34 @@ class VibeCodingEngine(
         }
     }
 
-    fun loadProjectConfig() {
-        val workspace = try {
-            ideService.getPrimaryWorkspacePath()
-        } catch (_: Exception) { return }
-        _state.value = _state.value.copy(workspacePath = workspace)
-        xedConfig = XedConfigLoader.loadConfig(workspace)
-        applyConfigPermissions()
-        xedConfig.instructions?.let {
-            if (it.isNotBlank()) {
-                systemPromptBuilder.projectInstructions = it
-            }
-        }
-    }
+    // ── State accessors ─────────────────────────────────────────────
 
-    fun refreshProjectConfig() {
-        systemPromptBuilder.reset()
-        loadProjectConfig()
-        loadFileCommandsIntoCatalog()
-    }
+    val messages: List<UIMessage> get() = _state.value.messages
+    val isProcessing: Boolean get() = _state.value.isProcessing
 
-    fun isToolEnabled(toolName: String): Boolean {
-        return xedConfig.tools[toolName] ?: true
-    }
+    // ── Config delegation ───────────────────────────────────────────
 
-    fun applyConfigPermissions() {
-        for (rule in xedConfig.permission) {
-            val action = when (rule.action.lowercase()) {
-                "allow" -> PermissionAction.ALLOW
-                "deny" -> PermissionAction.DENY
-                else -> PermissionAction.ASK
-            }
-            permissionManager.addRule(PermissionAutoRespondRule(
-                toolPattern = rule.tool,
-                argPattern = rule.arg,
-                action = action,
-                description = rule.description,
-            ))
-        }
-    }
+    fun loadProjectConfig() = configManager.loadProjectConfig()
+    fun refreshProjectConfig() = configManager.refreshProjectConfig()
+    fun isToolEnabled(toolName: String): Boolean = configManager.isToolEnabled(toolName)
+    fun applyConfigPermissions() = configManager.applyConfigPermissions()
+    fun loadFileCommandsIntoCatalog() = configManager.loadFileCommandsIntoCatalog()
+    fun refreshCommands() = configManager.refreshCommands()
+    suspend fun evaluateHooks(event: HookEvent, ctx: HookContext): HookResult = configManager.evaluateHooks(event, ctx)
+    fun addPermissionAutoRespondRule(rule: PermissionAutoRespondRule) = configManager.addPermissionAutoRespondRule(rule)
+    fun removePermissionAutoRespondRule(idOrPattern: String) = configManager.removePermissionAutoRespondRule(idOrPattern)
+    fun addCommandToCatalog(entry: CommandCatalogEntry) = configManager.addCommandToCatalog(entry)
+    fun removeCommandFromCatalog(id: String) = configManager.removeCommandFromCatalog(id)
+    fun getCommandCatalog(): List<CommandCatalogEntry> = configManager.getCommandCatalog()
 
-    fun loadFileCommandsIntoCatalog() {
-        val fileCommands = CommandFileLoader.listCommands(context)
-        val workspace = try {
-            ideService.getPrimaryWorkspacePath()
-        } catch (_: Exception) { "" }
+    // ── Tool list delegation ────────────────────────────────────────
 
-        val workspaceCommands = if (workspace.isNotBlank()) {
-            val workspaceCommandsRoot = File(workspace, ".xed/commands")
-            if (workspaceCommandsRoot.exists() && workspaceCommandsRoot.isDirectory) {
-                workspaceCommandsRoot.listFiles()
-                    ?.filter { it.extension == "md" }
-                    ?.mapNotNull { file -> CommandFileLoader.parseFile(file) }
-                    ?: emptyList()
-            } else {
-                emptyList()
-            }
-        } else {
-            emptyList()
-        }
+    fun buildToolList(
+        assistant: com.rk.ai.models.Assistant,
+        settings: com.rk.ai.persistence.settings.Settings,
+    ): List<Tool> = toolDefinitions.buildToolList(assistant, settings)
 
-        val merged = mutableMapOf<String, CommandDefinition>()
-        for (cmd in fileCommands) {
-            merged[cmd.id] = cmd
-        }
-        for (cmd in workspaceCommands) {
-            merged[cmd.id] = cmd
-        }
-
-        for (cmd in merged.values) {
-            if (cmd.hidden) continue
-            addCommandToCatalog(CommandCatalogEntry(
-                id = "file:${cmd.id}",
-                title = cmd.name,
-                description = cmd.description,
-                category = cmd.category,
-                slash = cmd.id,
-                prompt = cmd.prompt,
-            ))
-        }
-    }
-
-    suspend fun evaluateHooks(event: HookEvent, context: HookContext): HookResult {
-        return hookManager.checkAll(event, context)
-    }
-
-    fun addPermissionAutoRespondRule(rule: PermissionAutoRespondRule) {
-        permissionManager.addRule(rule)
-        _state.value = _state.value.copy(
-            permissionAutoRespondRules = permissionManager.rules,
-        )
-    }
-
-    fun removePermissionAutoRespondRule(idOrPattern: String) {
-        permissionManager.removeRule(idOrPattern)
-        _state.value = _state.value.copy(
-            permissionAutoRespondRules = permissionManager.rules,
-        )
-    }
-
-    fun addCommandToCatalog(entry: CommandCatalogEntry) {
-        storedCommandCatalog.removeAll { it.id == entry.id }
-        storedCommandCatalog.add(entry)
-        _state.value = _state.value.copy(
-            commandCatalog = storedCommandCatalog.toList(),
-        )
-    }
-
-    fun removeCommandFromCatalog(id: String) {
-        storedCommandCatalog.removeAll { it.id == id }
-        _state.value = _state.value.copy(
-            commandCatalog = storedCommandCatalog.toList(),
-        )
-    }
-
-    fun getCommandCatalog(): List<CommandCatalogEntry> = storedCommandCatalog.toList()
+    // ── Session delegation ──────────────────────────────────────────
 
     fun setSessionTodos(sessionId: Uuid, todos: List<SessionTodo>) {
         _state.value = _state.value.copy(todos = todos)
@@ -435,479 +365,16 @@ class VibeCodingEngine(
         }
     }
 
-    private val todowriteTool = Tool(
-        name = "todowrite",
-        description = "Create and manage a structured task list for the current session. Use this to break down complex tasks into tracked subtasks. Each todo has a description and status (pending/in_progress/completed/cancelled). Call this at the start of multi-step work to create a plan, then update status as you complete each step. Pass an empty array to read the current todos.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("todos") {
-                        put("type", "string")
-                        put("description", "JSON array of todos. Each item: {\"description\": \"...\", \"status\": \"pending\"}. Options for status: pending, in_progress, completed, cancelled. Example: [{\"description\": \"Read the main file\", \"status\": \"pending\"}, {\"description\": \"Implement the fix\", \"status\": \"pending\"}]")
-                    }
-                },
-                required = listOf("todos"),
-            )
-        },
-        execute = { args ->
-            val todosElement = args.asJsonObject["todos"]
-                ?: return@Tool listOf(UIMessagePart.Text("Error: missing required argument 'todos'"))
-            val todosJson = when {
-                todosElement.isJsonArray -> todosElement.asJsonArray
-                todosElement.isJsonPrimitive && todosElement.asJsonPrimitive.isString -> {
-                    try {
-                        com.google.gson.JsonParser.parseString(todosElement.asString).asJsonArray
-                    } catch (e: Exception) {
-                        return@Tool listOf(UIMessagePart.Text("Error: invalid JSON in 'todos': ${e.message}"))
-                    }
-                }
-                else -> return@Tool listOf(UIMessagePart.Text("Error: 'todos' must be a JSON array or a JSON string"))
-            }
-            val todos = todosJson.mapIndexed { index, item ->
-                val obj = item.asJsonObject
-                val desc = obj["description"]?.asJsonPrimitive?.asString ?: "Untitled task"
-                val statusStr = obj["status"]?.asJsonPrimitive?.asString ?: "pending"
-                val status = when (statusStr.lowercase()) {
-                    "in_progress" -> SessionTodoStatus.IN_PROGRESS
-                    "completed" -> SessionTodoStatus.COMPLETED
-                    "cancelled" -> SessionTodoStatus.CANCELLED
-                    else -> SessionTodoStatus.PENDING
-                }
-                val id = obj["id"]?.asJsonPrimitive?.asString ?: "todo-${Uuid.random()}"
-                SessionTodo(id = id, description = desc, status = status)
-            }
+    fun createBranchSession(parentSessionId: Uuid, title: String = "Branch"): Uuid =
+        sessionManager.createBranchSession(parentSessionId, title)
+    fun switchToSession(sessionId: Uuid) = sessionManager.switchToSession(sessionId)
+    fun closeSession(sessionId: Uuid) = sessionManager.closeSession(sessionId)
+    fun renameSession(sessionId: Uuid, newTitle: String) = sessionManager.renameSession(sessionId, newTitle)
 
-            val currentTodos = _state.value.todos
-            val isReadOp = todos.isEmpty()
-            val sessionId = _state.value.activeSessionId ?: Uuid.random()
-
-            if (!isReadOp) {
-                setSessionTodos(sessionId, todos)
-            }
-
-            val displayTodos = if (isReadOp) currentTodos else todos
-            val summary = buildString {
-                if (isReadOp) {
-                    appendLine("Current task plan (${displayTodos.size} items):")
-                } else {
-                    appendLine("Task plan updated (${displayTodos.size} items):")
-                }
-                displayTodos.forEachIndexed { i, todo ->
-                    val icon = when (todo.status) {
-                        SessionTodoStatus.COMPLETED -> "[✓]"
-                        SessionTodoStatus.IN_PROGRESS -> "[→]"
-                        SessionTodoStatus.CANCELLED -> "[✗]"
-                        SessionTodoStatus.PENDING -> "[ ]"
-                    }
-                    appendLine("  $icon ${i + 1}. ${todo.description}")
-                }
-                appendLine()
-                val completed = displayTodos.count { it.status == SessionTodoStatus.COMPLETED }
-                val inProgress = displayTodos.count { it.status == SessionTodoStatus.IN_PROGRESS }
-                appendLine("Progress: $completed/${displayTodos.size} completed, $inProgress in progress")
-            }
-            listOf(UIMessagePart.Text(summary))
-        },
-    )
-
-    private val planModeTool = Tool(
-        name = "planMode",
-        description = "Create, approve, and track structured execution plans. Actions: create (title + steps JSON → plan, awaiting approval), approve (user accepts), reject (reason), status (show progress), update (stepId + stepStatus + result), cancel. When a plan is awaiting approval, do NOT execute any changes until approved.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    putJsonObject("action") { put("type", "string") }
-                    putJsonObject("title") { put("type", "string") }
-                    putJsonObject("description") { put("type", "string") }
-                    putJsonObject("steps") { put("type", "string") }
-                    putJsonObject("stepId") { put("type", "string") }
-                    putJsonObject("stepStatus") { put("type", "string") }
-                    putJsonObject("result") { put("type", "string") }
-                    putJsonObject("reason") { put("type", "string") }
-                },
-                required = listOf("action"),
-            )
-        },
-        execute = { args ->
-            val action = args.asJsonObject["action"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("Missing 'action'"))
-            val planImports = com.rk.ai.agent.plan.PlanManager
-            when (action.lowercase()) {
-                "create" -> {
-                    val title = args.asJsonObject["title"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("title required"))
-                    val description = args.asJsonObject["description"]?.asJsonPrimitive?.asString ?: ""
-                    val stepsRaw = args.asJsonObject["steps"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("steps (JSON array string) required"))
-                    val steps = try {
-                        val arr = com.google.gson.JsonParser.parseString(stepsRaw).asJsonArray
-                        arr.map { elem ->
-                            if (elem.isJsonPrimitive) elem.asString to ""
-                            else if (elem.isJsonObject) {
-                                val o = elem.asJsonObject
-                                (o["description"]?.asString ?: o["desc"]?.asString ?: "") to (o["details"]?.asString ?: o["detail"]?.asString ?: "")
-                            } else "" to ""
-                        }.filter { it.first.isNotBlank() }
-                    } catch (_: Exception) { return@Tool listOf(UIMessagePart.Text("Invalid steps JSON: must be an array of strings or {description, details} objects")) }
-
-                    if (steps.isEmpty()) return@Tool listOf(UIMessagePart.Text("Steps list is empty"))
-                    val plan = planImports.createPlan(title, description, steps)
-                    val display = buildString {
-                        appendLine("## Plan: ${plan.title}")
-                        if (plan.description.isNotBlank()) appendLine("> ${plan.description}")
-                        appendLine()
-                        plan.steps.forEachIndexed { i, s -> appendLine("${i + 1}. [ ] ${s.description}") }
-                        appendLine()
-                        appendLine("⏳ Awaiting approval. Type 'approve' to start.")
-                    }
-                    listOf(UIMessagePart.Text(display))
-                }
-                "approve" -> {
-                    if (!planImports.isAwaitingApproval()) return@Tool listOf(UIMessagePart.Text("No plan awaiting approval. Create one with planMode create first."))
-                    val plan = planImports.approvePlan()
-                    listOf(UIMessagePart.Text("✅ Plan approved! Starting: ${plan?.title ?: "Untitled"}. Begin with step 1."))
-                }
-                "reject" -> {
-                    val reason = args.asJsonObject["reason"]?.asJsonPrimitive?.asString ?: "No reason"
-                    planImports.rejectPlan(reason)
-                    listOf(UIMessagePart.Text("Plan rejected: $reason. Refine and present again."))
-                }
-                "status" -> {
-                    val ctx = planImports.buildContext()
-                    if (ctx.isBlank()) listOf(UIMessagePart.Text("No active plan."))
-                    else listOf(UIMessagePart.Text(ctx))
-                }
-                "update" -> {
-                    val stepId = args.asJsonObject["stepId"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("stepId required"))
-                    val raw = args.asJsonObject["stepStatus"]?.asJsonPrimitive?.asString ?: return@Tool listOf(UIMessagePart.Text("stepStatus required"))
-                    val result = args.asJsonObject["result"]?.asJsonPrimitive?.asString?.takeIf { it.isNotBlank() }
-                    val status = when (raw.lowercase()) { "in_progress","inprogress","started" -> com.rk.ai.agent.plan.StepStatus.IN_PROGRESS; "completed","done" -> com.rk.ai.agent.plan.StepStatus.COMPLETED; "failed","error" -> com.rk.ai.agent.plan.StepStatus.FAILED; "skipped" -> com.rk.ai.agent.plan.StepStatus.SKIPPED; else -> return@Tool listOf(UIMessagePart.Text("bad stepStatus: $raw")) }
-                    val plan = planImports.updateStep(stepId, status, result) ?: planImports.updateStepByDescription(stepId, status, result) ?: return@Tool listOf(UIMessagePart.Text("Step '$stepId' not found"))
-                    val allDone = plan.status == com.rk.ai.agent.plan.PlanStatus.COMPLETED
-                    listOf(UIMessagePart.Text("Step '$stepId' → $raw. ${plan.progressSummary}${if (allDone) "\n🎉 All steps completed!" else ""}"))
-                }
-                "cancel" -> {
-                    planImports.cancelPlan()
-                    listOf(UIMessagePart.Text("Plan cancelled."))
-                }
-                else -> listOf(UIMessagePart.Text("Unknown action: $action. Use: create, approve, reject, status, update, cancel"))
-            }
-        },
-    )
-
-    fun refreshCommands() {
-        storedCommandCatalog.removeAll { it.id.startsWith("file:") }
-        loadFileCommandsIntoCatalog()
-        _state.value = _state.value.copy(commandCatalog = storedCommandCatalog.toList())
-    }
-
-    private val listCustomCommandsTool = Tool(
-        name = "listCustomCommands",
-        description = "Lists all custom commands loaded from .xed/commands/. These are user-defined or project-specific commands that can be executed by invoking their prompt template.",
-        execute = { _ ->
-            val customCmds = storedCommandCatalog.filter { it.id.startsWith("file:") }
-            val text = buildString {
-                if (customCmds.isEmpty()) {
-                    appendLine("No custom commands found. Add .md files to .xed/commands/ to create custom commands.")
-                } else {
-                    appendLine("Custom commands (${customCmds.size}):")
-                    customCmds.forEach { cmd ->
-                        appendLine("  /${cmd.slash} - ${cmd.title}")
-                        appendLine("    ${cmd.description}")
-                        appendLine()
-                    }
-                    appendLine("Use the prompt content of a command as a template for your own tasks.")
-                }
-            }
-            listOf(UIMessagePart.Text(text))
-        },
-    )
-
-    private fun applyPermissionRules(cfg: UnifiedConfig) {
-        for (rule in cfg.permissionRules) {
-            val action = when (rule.action.lowercase()) {
-                "allow" -> PermissionAction.ALLOW
-                "deny" -> PermissionAction.DENY
-                else -> PermissionAction.ASK
-            }
-            permissionManager.addRule(
-                PermissionAutoRespondRule(
-                    toolPattern = rule.toolPattern,
-                    argPattern = rule.argPattern,
-                    action = action,
-                    description = rule.description,
-                )
-            )
-        }
-    }
-
-    private fun buildToolList(assistant: com.rk.ai.models.Assistant, settings: com.rk.ai.persistence.settings.Settings): List<Tool> {
-        val mcpTools = mcpManager.getAllAvailableTools().map { (serverId, mcpTool) ->
-            Tool(
-                name = mcpTool.name,
-                description = mcpTool.description ?: "",
-                parameters = mcpTool.inputSchema?.let { schema ->
-                    { schema }
-                } ?: { InputSchema.Obj(kotlinx.serialization.json.buildJsonObject { }) },
-                execute = { args ->
-                    val argsStr = try {
-                        com.google.gson.Gson().toJson(args)
-                    } catch (_: Exception) {
-                        args.toString()
-                    }
-                    val kotlinxArgs = json.parseToJsonElement(argsStr).jsonObject
-                    toolValidator.validateWithSchema(
-                        toolName = mcpTool.name,
-                        schema = mcpTool.inputSchema,
-                        args = args,
-                    )
-                    mcpManager.callTool(serverId, mcpTool.name, kotlinxArgs)
-                },
-            )
-        }
-        val baseTools = buildList {
-            addAll(toolRegistry.withMcpTools(mcpTools))
-            addAll(localTools.getTools(assistant.localTools))
-            if (settings.enableWebSearch) addAll(createSearchTools(settings))
-            addAll(createSkillTools(
-                enabledSkills = assistant.enabledSkills,
-                allSkills = skillManager.listSkills(),
-                skillManager = skillManager,
-            ))
-            add(todowriteTool)
-            add(planModeTool)
-            add(listCustomCommandsTool)
-        }
-
-        val dispatchTools = baseTools
-        val parallelTool = Tool(
-            name = "parallel",
-            description = "Execute multiple independent tool calls concurrently. Accepts a JSON array of {tool, args} objects. Results are ordered with headers showing which call produced which output.",
-            parameters = {
-                InputSchema.Obj(
-                    properties = buildJsonObject {
-                        putJsonObject("calls") {
-                            put("type", "array")
-                            put("description", "Array of {tool: string, args: object} calls to run in parallel. Tools that modify state (writeFile, editFile, etc.) should NOT be parallelized with each other or with reads of the same files.")
-                            putJsonObject("items") {
-                                put("type", "object")
-                                putJsonObject("properties") {
-                                    putJsonObject("tool") { put("type", "string"); put("description", "Tool name to call") }
-                                    putJsonObject("args") { put("type", "object"); put("description", "Arguments for the tool") }
-                                }
-                                putJsonArray("required") { add(JsonPrimitive("tool")); add(JsonPrimitive("args")) }
-                            }
-                        }
-                    },
-                    required = listOf("calls"),
-                )
-            },
-            execute = { args ->
-                val obj = args.asJsonObject
-                val calls = obj["calls"]?.asJsonArray
-                    ?: return@Tool listOf(UIMessagePart.Text("Missing 'calls' array"))
-                val toolMap = dispatchTools.associateBy { it.name }
-
-                val results = coroutineScope {
-                    calls.map { callElement ->
-                        async {
-                            val callObj = runCatching { callElement.asJsonObject }.getOrElse {
-                                return@async listOf(UIMessagePart.Text("[Error] Invalid call element"))
-                            }
-                            val toolName = callObj["tool"]?.asJsonPrimitive?.asString ?: "?"
-                            val callArgs = callObj["args"] ?: com.google.gson.JsonObject()
-                            val tool = toolMap[toolName]
-                            if (tool == null) {
-                                listOf(UIMessagePart.Text("[Error] Unknown tool: $toolName"))
-                            } else {
-                                try {
-                                    tool.execute(callArgs)
-                                } catch (e: Exception) {
-                                    listOf(UIMessagePart.Text("[Error] $toolName failed: ${e.message}"))
-                                }
-                            }
-                        }
-                    }.awaitAll()
-                }
-
-                val combined = mutableListOf<UIMessagePart>()
-                for (i in results.indices) {
-                    val callObj = runCatching { calls[i].asJsonObject }.getOrElse { continue }
-                    val toolName = callObj["tool"]?.asJsonPrimitive?.asString ?: "?"
-                    val argHint = if (callObj["args"] is com.google.gson.JsonObject) {
-                        val keys = callObj["args"].asJsonObject.entrySet().take(2).joinToString(", ") { it.key }
-                        if (keys.isEmpty()) "" else " ($keys)"
-                    } else ""
-                    combined.add(UIMessagePart.Text("\n[Result ${i + 1} - $toolName$argHint]"))
-                    combined.addAll(results[i])
-                }
-
-                combined
-            }
-        )
-
-        val cfg = configProvider.unifiedConfig.value
-        return (baseTools + parallelTool)
-            .filter { tool -> cfg.isToolEnabled(tool.name) }
-            .map { tool ->
-                permissionManager.wrapToolWithPermissionCheck(tool) { _state.value }
-            }
-    }
-
-    fun dispose() {
-        generationPipeline.cancel()
-        orchestrator.stop()
-        engineScope.coroutineContext[Job]?.cancel()
-        appScope.coroutineContext[Job]?.cancel()
-        database.close()
-    }
-
-    fun getCurrentAssistantId(): Uuid {
-        val settings = settingsStore.settingsFlow.value
-        return runCatching { settings.getCurrentAssistant().id }.getOrElse {
-            Uuid.parse("0950e2dc-9bd5-4801-afa3-aa887aa36b4e")
-        }
-    }
-
-    fun openFileInEditor(path: String) {
-        ideService.openFile(java.io.File(path))
-    }
-
-    fun trackAgentActivity(activity: AgentActivity) {
-        _state.value = _state.value.copy(
-            agentActivities = _state.value.agentActivities + activity,
-        )
-    }
-
-    fun updateAgentActivity(agentName: String, status: AgentActivityStatus, result: AgentResult? = null) {
-        val activities = _state.value.agentActivities.toMutableList()
-        val idx = activities.indexOfLast { it.agentName == agentName && it.status == AgentActivityStatus.RUNNING }
-        if (idx >= 0) {
-            activities[idx] = activities[idx].copy(
-                status = status,
-                result = result,
-                completedAt = if (status == AgentActivityStatus.COMPLETED || status == AgentActivityStatus.FAILED)
-                    System.currentTimeMillis() else null,
-            )
-            _state.value = _state.value.copy(agentActivities = activities)
-        }
-    }
-
-    fun addSecurityAlert(alert: SecurityAlert) {
-        _state.value = _state.value.copy(
-            securityAlerts = _state.value.securityAlerts + alert,
-        )
-    }
-
-    fun dismissSecurityAlert(id: String?) {
-        if (id == null) return
-        _state.value = _state.value.copy(
-            securityAlerts = _state.value.securityAlerts.filter { it.id != id },
-        )
-    }
-
-    fun clearSecurityAlerts() {
-        _state.value = _state.value.copy(securityAlerts = emptyList())
-    }
-
-    private val systemPromptBuilder = SystemPromptBuilder(ideService)
-
-    private inner class SystemPromptTransformer : InputMessageTransformer {
-        @Volatile
-        private var initialPromptInjected = false
-
-        override suspend fun transform(
-            ctx: TransformerContext,
-            messages: List<UIMessage>,
-        ): List<UIMessage> {
-            if (messages.isEmpty()) return messages
-
-            val result = mutableListOf<UIMessage>()
-
-            // Inject system prompt once at the very beginning
-            if (!initialPromptInjected) {
-                val systemPrompt = systemPromptBuilder.buildInitialSystemPrompt(ctx.model)
-                if (systemPrompt.isNotBlank()) {
-                    result.add(UIMessage.system(systemPrompt))
-                }
-                initialPromptInjected = true
-            }
-
-            // Strip stale system-context messages (workspace + plan) from history
-            val cleaned = messages.filterNot { msg ->
-                msg.role == com.rk.ai.core.MessageRole.SYSTEM &&
-                msg.parts.any { part ->
-                    part is UIMessagePart.Text && (
-                        part.text.contains("<workspace_context>") ||
-                        part.text.contains("<active_plan>")
-                    )
-                }
-            }
-
-            result.addAll(cleaned)
-
-            // Append fresh workspace context
-            val ctxBlock = systemPromptBuilder.buildWorkspaceContext()
-            if (ctxBlock.isNotBlank()) {
-                result.add(UIMessage.system(ctxBlock))
-            }
-
-            // Append fresh plan context (if a plan is active)
-            val planCtx = systemPromptBuilder.buildPlanContext()
-            if (planCtx.isNotBlank()) {
-                result.add(UIMessage.system(planCtx))
-            }
-
-            return result
-        }
-
-        fun reset() {
-            initialPromptInjected = false
-            systemPromptBuilder.reset()
-        }
-    }
-
-    private val systemPromptTransformer = SystemPromptTransformer()
-
-    val messages: List<UIMessage> get() = _state.value.messages
-    val isProcessing: Boolean get() = _state.value.isProcessing
-
-    fun createBranchSession(parentSessionId: Uuid, title: String = "Branch"): Uuid {
-        val newId = Uuid.random()
-        val node = SessionNode(
-            id = newId,
-            parentId = parentSessionId,
-            title = title,
-        )
-        _state.value = _state.value.copy(
-            sessionTree = _state.value.sessionTree + node,
-            activeSessionId = newId,
-            parentSessionId = parentSessionId,
-        )
-        engineScope.launch {
-            vibeEventBus.emit(VibeCodingEvent.SessionCreated(newId, parentSessionId))
-        }
-        return newId
-    }
-
-    fun switchToSession(sessionId: Uuid) {
-        val node = _state.value.sessionById[sessionId] ?: return
-        _state.value = _state.value.copy(
-            messages = node.messages,
-            activeSessionId = sessionId,
-            parentSessionId = node.parentId,
-        )
-    }
-
-    private fun saveCurrentSessionMessages() {
-        val sessionId = _state.value.activeSessionId ?: return
-        val tree = _state.value.sessionTree.toMutableList()
-        val idx = tree.indexOfFirst { it.id == sessionId }
-        if (idx >= 0) {
-            tree[idx] = tree[idx].copy(messages = _state.value.messages)
-            _state.value = _state.value.copy(sessionTree = tree)
-        }
-    }
+    // ── Conversation / Message sending ──────────────────────────────
 
     fun sendMessage(text: String, extraParts: List<UIMessagePart> = emptyList()) {
-        ensureSessionExists(text.trim())
+        sessionManager.ensureSessionExists(text.trim())
         val trimmed = text.trim()
         generationPipeline.execute(
             text = trimmed,
@@ -917,7 +384,7 @@ class VibeCodingEngine(
     }
 
     fun sendOrchestrated(goal: String) {
-        ensureSessionExists(goal.trim())
+        sessionManager.ensureSessionExists(goal.trim())
         val job = engineScope.launch {
             val currentMessages = _state.value.messages
             val userMsg = UIMessage(
@@ -932,6 +399,18 @@ class VibeCodingEngine(
             engineScope.launch { vibeEventBus.emit(VibeCodingEvent.GenerationStarted) }
             val config = buildGenerationConfig()
             val tools = config?.tools ?: emptyList()
+
+            // Wire progress messages from orchestrator into the conversation
+            orchestrator.setProgressListener { progressMsg ->
+                val sysMsg = UIMessage(
+                    role = MessageRole.SYSTEM,
+                    parts = listOf(UIMessagePart.Text(progressMsg)),
+                )
+                _state.value = _state.value.copy(
+                    messages = _state.value.messages + sysMsg,
+                )
+            }
+
             val result = orchestrator.execute(goal, tools) { prompt, contextTools, contextBundle ->
                 generateWithLLM(
                     prompt = prompt,
@@ -963,10 +442,222 @@ class VibeCodingEngine(
                 )
             }
             engineScope.launch { vibeEventBus.emit(VibeCodingEvent.GenerationFinished) }
-            saveConversation()
+            sessionManager.saveConversation()
         }
         orchestrator.setRunningJob(job)
     }
+
+    fun runAutonomous(goal: String) {
+        sendOrchestrated(goal)
+    }
+
+    fun submitAnswer(answer: String) {
+        val pending = _state.value.pendingQuestion ?: return
+        val answerMsg = UIMessage(
+            role = MessageRole.USER,
+            parts = listOf(UIMessagePart.Text(answer)),
+        )
+        _state.value = _state.value.copy(
+            messages = _state.value.messages + answerMsg,
+            pendingQuestion = null,
+        )
+        generationPipeline.resume(::buildGenerationConfig)
+    }
+
+    fun stopGeneration() {
+        generationPipeline.cancel()
+        orchestrator.stop()
+        _state.value = _state.value.copy(isProcessing = false, currentPhase = AgentPhase.IDLE)
+    }
+
+    // ── Conversation persistence ────────────────────────────────────
+
+    fun saveConversation() {
+        engineScope.launch { sessionManager.saveConversation() }
+    }
+
+    fun loadConversation(conversation: com.rk.ai.models.Conversation) =
+        sessionManager.loadConversation(conversation)
+
+    fun deleteConversation(conversationId: Uuid) =
+        sessionManager.deleteConversation(conversationId)
+
+    // ── Agent activity ──────────────────────────────────────────────
+
+    fun trackAgentActivity(activity: AgentActivity) {
+        _state.value = _state.value.copy(
+            agentActivities = _state.value.agentActivities + activity,
+        )
+    }
+
+    fun updateAgentActivity(agentName: String, status: AgentActivityStatus, result: AgentResult? = null) {
+        val activities = _state.value.agentActivities.toMutableList()
+        val idx = activities.indexOfLast { it.agentName == agentName && it.status == AgentActivityStatus.RUNNING }
+        if (idx >= 0) {
+            activities[idx] = activities[idx].copy(
+                status = status,
+                result = result,
+                completedAt = if (status == AgentActivityStatus.COMPLETED || status == AgentActivityStatus.FAILED)
+                    System.currentTimeMillis() else null,
+            )
+            _state.value = _state.value.copy(agentActivities = activities)
+        }
+    }
+
+    // ── Security alerts ─────────────────────────────────────────────
+
+    fun addSecurityAlert(alert: SecurityAlert) {
+        _state.value = _state.value.copy(
+            securityAlerts = _state.value.securityAlerts + alert,
+        )
+    }
+
+    fun dismissSecurityAlert(id: String?) {
+        if (id == null) return
+        _state.value = _state.value.copy(
+            securityAlerts = _state.value.securityAlerts.filter { it.id != id },
+        )
+    }
+
+    fun clearSecurityAlerts() {
+        _state.value = _state.value.copy(securityAlerts = emptyList())
+    }
+
+    // ── Tool approval ───────────────────────────────────────────────
+
+    fun approveTool(toolCallId: String) {
+        if (isProcessing) return
+        updateToolApproval(toolCallId, ToolApprovalState.Approved)
+    }
+
+    fun denyTool(toolCallId: String, reason: String = "") {
+        if (isProcessing) return
+        updateToolApproval(toolCallId, ToolApprovalState.Denied(reason))
+    }
+
+    fun answerTool(toolCallId: String, answer: String) {
+        if (isProcessing) return
+        updateToolApproval(toolCallId, ToolApprovalState.Answered(answer))
+    }
+
+    private fun updateToolApproval(toolCallId: String, newState: ToolApprovalState) {
+        val messages = _state.value.messages.toMutableList()
+        for (i in messages.indices) {
+            val msg = messages[i]
+            val updatedParts = msg.parts.map { part ->
+                if (part is UIMessagePart.Tool && part.toolCallId == toolCallId) {
+                    part.copy(approvalState = newState)
+                } else part
+            }
+            if (updatedParts !== msg.parts) {
+                messages[i] = msg.copy(parts = updatedParts)
+                _state.value = _state.value.copy(messages = messages)
+                sessionManager.saveCurrentSessionMessages()
+                generationPipeline.resume(::buildGenerationConfig)
+                return
+            }
+        }
+    }
+
+    // ── Message management ──────────────────────────────────────────
+
+    fun deleteMessage(index: Int) {
+        val msgs = _state.value.messages.toMutableList()
+        if (index in msgs.indices) {
+            val deleted = msgs.removeAt(index)
+            _state.value = _state.value.copy(
+                messages = msgs,
+                recentlyDeletedMessage = index to deleted,
+            )
+            sessionManager.saveCurrentSessionMessages()
+        }
+    }
+
+    fun clearConversation() {
+        PlanManager.clear()
+        _state.value = VibeCodingState(
+            commandCatalog = configManager.getCommandCatalog(),
+            permissionAutoRespondRules = permissionManager.rules,
+        )
+        systemPromptTransformer.reset()
+    }
+
+    fun undoDeleteMessage() {
+        val deleted = _state.value.recentlyDeletedMessage ?: return
+        val (index, msg) = deleted
+        val msgs = _state.value.messages.toMutableList()
+        val insertAt = index.coerceIn(0, msgs.size)
+        msgs.add(insertAt, msg)
+        _state.value = _state.value.copy(messages = msgs, recentlyDeletedMessage = null)
+        sessionManager.saveCurrentSessionMessages()
+    }
+
+    fun clearError() {
+        _state.value = _state.value.copy(error = null)
+    }
+
+    // ── Debug & UI state ────────────────────────────────────────────
+
+    fun toggleSuggestions() {
+        _state.value = _state.value.copy(showSuggestions = !_state.value.showSuggestions)
+    }
+
+    fun toggleDebugMode() {
+        val newMode = !_state.value.debugMode
+        _state.value = _state.value.copy(debugMode = newMode)
+        if (!newMode) {
+            _state.value = _state.value.copy(debugInfo = null)
+        }
+    }
+
+    fun updateDebugInfo() {
+        val s = _state.value
+        val msgs = s.messages
+        val tokenEstimate = if (msgs.isNotEmpty()) com.rk.ai.agent.TokenEstimator.estimate(msgs) else null
+        var updated = if (s.contextTokens != tokenEstimate) s.copy(contextTokens = tokenEstimate) else s
+        if (s.debugMode) {
+            val lastUser = msgs.lastOrNull { it.role == MessageRole.USER }
+            val lastAssistant = msgs.lastOrNull { it.role == MessageRole.ASSISTANT }
+            val toolCalls = msgs.flatMap { it.getTools() }.map { "${it.toolName}(${it.input.take(100)}) -> ${it.statusLabel}" }
+            val settings = settingsStore.settingsFlow.value
+            val model = settings.findModelById(settings.chatModelId)
+            updated = updated.copy(
+                debugInfo = DebugInfo(
+                    lastPrompt = lastUser?.toText() ?: "",
+                    lastResponse = lastAssistant?.toText() ?: "",
+                    lastToolCalls = toolCalls.takeLast(20),
+                    inputMessages = msgs.filter { it.role == MessageRole.USER },
+                    outputMessages = msgs.filter { it.role == MessageRole.ASSISTANT },
+                    modelName = model?.displayName?.ifEmpty { model.modelId } ?: "No model",
+                    totalTokens = s.toolExecutions.sumOf { it.tokens },
+                ),
+            )
+        }
+        if (updated !== s) _state.value = updated
+    }
+
+    // ── Misc ────────────────────────────────────────────────────────
+
+    fun dispose() {
+        generationPipeline.cancel()
+        orchestrator.stop()
+        engineScope.coroutineContext[Job]?.cancel()
+        appScope.coroutineContext[Job]?.cancel()
+        database.close()
+    }
+
+    fun getCurrentAssistantId(): Uuid {
+        val settings = settingsStore.settingsFlow.value
+        return runCatching { settings.getCurrentAssistant().id }.getOrElse {
+            Uuid.parse("0950e2dc-9bd5-4801-afa3-aa887aa36b4e")
+        }
+    }
+
+    fun openFileInEditor(path: String) {
+        ideService.openFile(File(path))
+    }
+
+    // ── Internal ────────────────────────────────────────────────────
 
     private suspend fun generateWithLLM(
         prompt: String,
@@ -982,7 +673,6 @@ class VibeCodingEngine(
         val inputTransformers = config.inputTransformers
         val outputTransformers = config.outputTransformers
 
-        // Include conversation history so the LLM has context
         val messages = conversationHistory + listOf(
             UIMessage.user(prompt)
         )
@@ -999,38 +689,17 @@ class VibeCodingEngine(
             maxSteps = 50,
         ).collect { chunk ->
             when (chunk) {
-                is GenerationChunk.Messages -> {
+                is com.rk.ai.agent.GenerationChunk.Messages -> {
                     val lastMsg = chunk.messages.lastOrNull()
                     if (lastMsg != null) {
                         resultText = lastMsg.toText()
                     }
                 }
-                is GenerationChunk.GenerationError -> { }
+                is com.rk.ai.agent.GenerationChunk.GenerationError -> { }
                 else -> { }
             }
         }
         return resultText
-    }
-
-    fun runAutonomous(goal: String) {
-        sendOrchestrated(goal)
-    }
-
-    fun stopGeneration() {
-        generationPipeline.cancel()
-        orchestrator.stop()
-        _state.value = _state.value.copy(isProcessing = false, currentPhase = AgentPhase.IDLE)
-    }
-
-    private fun ensureSessionExists(titleHint: String) {
-        if (_state.value.activeSessionId == null) {
-            val sessionId = Uuid.random()
-            val node = SessionNode(id = sessionId, title = titleHint.take(80))
-            _state.value = _state.value.copy(
-                sessionTree = _state.value.sessionTree + node,
-                activeSessionId = sessionId,
-            )
-        }
     }
 
     private suspend fun buildGenerationConfig(): GenerationConfig? {
@@ -1081,221 +750,4 @@ class VibeCodingEngine(
             outputTransformers = outputTransformers,
         )
     }
-
-    fun renameSession(sessionId: Uuid, newTitle: String) {
-        val tree = _state.value.sessionTree.toMutableList()
-        val idx = tree.indexOfFirst { it.id == sessionId }
-        if (idx >= 0) {
-            tree[idx] = tree[idx].copy(title = newTitle.take(80))
-            _state.value = _state.value.copy(sessionTree = tree)
-        }
-    }
-
-    fun closeSession(sessionId: Uuid) {
-        var tree = _state.value.sessionTree.toMutableList()
-        tree.removeAll { it.id == sessionId }
-        val current = _state.value.activeSessionId
-        val newActive = if (current == sessionId) tree.lastOrNull()?.id else current
-        _state.value = _state.value.copy(
-            sessionTree = tree,
-            activeSessionId = newActive,
-            parentSessionId = newActive?.let { _state.value.sessionById[it]?.parentId },
-        )
-    }
-
-    fun toggleSuggestions() {
-        _state.value = _state.value.copy(showSuggestions = !_state.value.showSuggestions)
-    }
-
-    fun toggleDebugMode() {
-        val newMode = !_state.value.debugMode
-        _state.value = _state.value.copy(debugMode = newMode)
-        if (!newMode) {
-            _state.value = _state.value.copy(debugInfo = null)
-        }
-    }
-
-    fun undoDeleteMessage() {
-        val deleted = _state.value.recentlyDeletedMessage ?: return
-        val (index, msg) = deleted
-        val msgs = _state.value.messages.toMutableList()
-        val insertAt = index.coerceIn(0, msgs.size)
-        msgs.add(insertAt, msg)
-        _state.value = _state.value.copy(messages = msgs, recentlyDeletedMessage = null)
-        saveCurrentSessionMessages()
-    }
-
-    fun updateDebugInfo() {
-        val s = _state.value
-        val msgs = s.messages
-        val tokenEstimate = if (msgs.isNotEmpty()) com.rk.ai.agent.TokenEstimator.estimate(msgs) else null
-        var updated = if (s.contextTokens != tokenEstimate) s.copy(contextTokens = tokenEstimate) else s
-        if (s.debugMode) {
-            val lastUser = msgs.lastOrNull { it.role == MessageRole.USER }
-            val lastAssistant = msgs.lastOrNull { it.role == MessageRole.ASSISTANT }
-            val toolCalls = msgs.flatMap { it.getTools() }.map { "${it.toolName}(${it.input.take(100)}) -> ${it.statusLabel}" }
-            val settings = settingsStore.settingsFlow.value
-            val model = settings.findModelById(settings.chatModelId)
-            updated = updated.copy(
-                debugInfo = DebugInfo(
-                    lastPrompt = lastUser?.toText() ?: "",
-                    lastResponse = lastAssistant?.toText() ?: "",
-                    lastToolCalls = toolCalls.takeLast(20),
-                    inputMessages = msgs.filter { it.role == MessageRole.USER },
-                    outputMessages = msgs.filter { it.role == MessageRole.ASSISTANT },
-                    modelName = model?.displayName?.ifEmpty { model.modelId } ?: "No model",
-                    totalTokens = s.toolExecutions.sumOf { it.tokens },
-                ),
-            )
-        }
-        if (updated !== s) _state.value = updated
-    }
-
-    fun deleteMessage(index: Int) {
-        val msgs = _state.value.messages.toMutableList()
-        if (index in msgs.indices) {
-            val deleted = msgs.removeAt(index)
-            _state.value = _state.value.copy(
-                messages = msgs,
-                recentlyDeletedMessage = index to deleted,
-            )
-            saveCurrentSessionMessages()
-        }
-    }
-
-    fun clearConversation() {
-        PlanManager.clear()
-        _state.value = VibeCodingState(
-            commandCatalog = storedCommandCatalog.toList(),
-            permissionAutoRespondRules = permissionManager.rules,
-        )
-        systemPromptTransformer.reset()
-    }
-
-    fun loadConversation(conversation: com.rk.ai.models.Conversation) {
-        engineScope.launch(Dispatchers.IO) {
-            try {
-                val loaded = conversationRepo.getConversationById(conversation.id)
-                if (loaded != null) {
-                    val messages = loaded.currentMessages
-                    _state.value = _state.value.copy(
-                        messages = messages,
-                        currentConversationId = loaded.id,
-                        error = null,
-                    )
-                    saveCurrentSessionMessages()
-                }
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(
-                    error = "Failed to load conversation: ${e.message}",
-                )
-            }
-        }
-    }
-
-    fun deleteConversation(conversationId: Uuid) {
-        engineScope.launch(Dispatchers.IO) {
-            try {
-                conversationRepo.getConversationById(conversationId)?.let { conv ->
-                    conversationRepo.deleteConversation(conv)
-                }
-                if (_state.value.currentConversationId == conversationId) {
-                    _state.value = VibeCodingState(
-                        commandCatalog = storedCommandCatalog.toList(),
-                        permissionAutoRespondRules = permissionManager.rules,
-                    )
-                }
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(
-                    error = "Failed to delete conversation: ${e.message}",
-                )
-            }
-        }
-    }
-
-    private suspend fun saveConversation() {
-        try {
-            val messages = _state.value.messages
-            if (messages.isEmpty()) return
-
-            val existingId = _state.value.currentConversationId
-            val convId = existingId ?: Uuid.random()
-            val assistantId = getCurrentAssistantId()
-
-            val title = messages.firstOrNull { it.role == MessageRole.USER }
-                ?.toText()?.take(100)?.trim() ?: "VibeCoding"
-
-            val conversation = com.rk.ai.models.Conversation(
-                id = convId,
-                assistantId = assistantId,
-                title = title,
-                messageNodes = messages.map { msg -> msg.toMessageNode() },
-            )
-
-            if (existingId != null && conversationRepo.existsConversationById(convId)) {
-                conversationRepo.updateConversation(conversation)
-            } else {
-                conversationRepo.insertConversation(conversation)
-            }
-
-            _state.value = _state.value.copy(currentConversationId = convId)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save conversation", e)
-        }
-    }
-
-    fun clearError() {
-        _state.value = _state.value.copy(error = null)
-    }
-
-    fun approveTool(toolCallId: String) {
-        if (isProcessing) return
-        updateToolApproval(toolCallId, ToolApprovalState.Approved)
-    }
-
-    fun denyTool(toolCallId: String, reason: String = "") {
-        if (isProcessing) return
-        updateToolApproval(toolCallId, ToolApprovalState.Denied(reason))
-    }
-
-    fun answerTool(toolCallId: String, answer: String) {
-        if (isProcessing) return
-        updateToolApproval(toolCallId, ToolApprovalState.Answered(answer))
-    }
-
-    private fun updateToolApproval(toolCallId: String, newState: ToolApprovalState) {
-        val messages = _state.value.messages.toMutableList()
-        for (i in messages.indices) {
-            val msg = messages[i]
-            val updatedParts = msg.parts.map { part ->
-                if (part is UIMessagePart.Tool && part.toolCallId == toolCallId) {
-                    part.copy(approvalState = newState)
-                } else part
-            }
-            if (updatedParts !== msg.parts) {
-                messages[i] = msg.copy(parts = updatedParts)
-                _state.value = _state.value.copy(messages = messages)
-                saveCurrentSessionMessages()
-                generationPipeline.resume(::buildGenerationConfig)
-                return
-            }
-        }
-    }
-
-
-}
-
-private class VibeCodingFileManager(private val context: Context) : FileManager {
-    override suspend fun saveUploadFromBytes(
-        bytes: ByteArray,
-        displayName: String,
-        mimeType: String,
-    ): String {
-        val dir = File(context.filesDir, "vibecoding_mcp").also { it.mkdirs() }
-        val file = File(dir, "${java.util.UUID.randomUUID()}_$displayName")
-        file.writeBytes(bytes)
-        return file.absolutePath
-    }
-
-    override fun getFile(id: String): File = File(id)
 }

@@ -897,19 +897,25 @@ class GitViewModel : ViewModel() {
     fun getFileDiffContent(filePath: String): String {
         return try {
             Git.open(currentRoot.value).use { git ->
-                val head = git.repository.resolve("HEAD")
+                val head = git.repository.resolve("HEAD") ?: return "No HEAD found"
                 val headCommit = git.repository.parseCommit(head)
                 val treeWalk = org.eclipse.jgit.treewalk.TreeWalk(git.repository)
-                treeWalk.addTree(headCommit.tree)
-                treeWalk.setRecursive(true)
-                treeWalk.setFilter(org.eclipse.jgit.treewalk.filter.PathFilter.create(filePath))
+                try {
+                    treeWalk.addTree(headCommit.tree)
+                    treeWalk.setRecursive(true)
+                    treeWalk.setFilter(org.eclipse.jgit.treewalk.filter.PathFilter.create(filePath))
 
-                if (treeWalk.next()) {
-                    val blobId = treeWalk.getObjectId(0)
-                    val obj = git.repository.newObjectReader().open(blobId)
-                    String(obj.bytes)
-                } else {
-                    "File not found in HEAD"
+                    if (treeWalk.next()) {
+                        val blobId = treeWalk.getObjectId(0)
+                        git.repository.newObjectReader().use { reader ->
+                            val obj = reader.open(blobId)
+                            String(obj.bytes)
+                        }
+                    } else {
+                        "File not found in HEAD"
+                    }
+                } finally {
+                    treeWalk.close()
                 }
             }
         } catch (e: Exception) {

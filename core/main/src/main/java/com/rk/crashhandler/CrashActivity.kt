@@ -216,7 +216,7 @@ class CrashActivity : ComponentActivity() {
             append("App version: ").append(versionName).appendLine()
             append("Version code: ").append(versionCode).appendLine()
             append("Modified: ").append(isModified()).appendLine()
-            append("Commit hash: ").append(BuildConfig.GIT_COMMIT_HASH.substring(0, 8)).appendLine()
+            append("Commit hash: ").append(BuildConfig.GIT_SHORT_COMMIT_HASH).appendLine()
             append("Package name: ").append(application!!.packageName).appendLine()
             append("Commit date: ").append(BuildConfig.GIT_COMMIT_DATE).appendLine()
             append("Origin: ").append(origin()).appendLine()

@@ -69,14 +69,16 @@ data class LspServerInstance(val server: LspServer, internal val lspProject: Lsp
     private val logs = mutableStateListOf<LspLogEntry>()
     var hasError by mutableStateOf(false)
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     fun addLog(messageParams: MessageParams) {
-        Handler(Looper.getMainLooper()).post {
+        mainHandler.post {
             logs.add(LspLogEntry(level = messageParams.type, message = messageParams.message))
         }
     }
 
     fun addLog(lspLogEntry: LspLogEntry) {
-        Handler(Looper.getMainLooper()).post {
+        mainHandler.post {
             if (lspLogEntry.level == MessageType.Error) hasError = true
             logs.add(lspLogEntry)
         }
@@ -92,7 +94,7 @@ data class LspServerInstance(val server: LspServer, internal val lspProject: Lsp
         }
             ?: run {
                 addLog(LspLogEntry(MessageType.Error, "Language server instance not found..."))
-                Handler(Looper.getMainLooper()).post { hasError = true }
+                mainHandler.post { hasError = true }
                 return null
             }
     }

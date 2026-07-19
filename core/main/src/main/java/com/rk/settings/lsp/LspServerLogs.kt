@@ -69,7 +69,7 @@ private fun buildLogs(server: LspServer, instance: LspServerInstance, logLevel: 
     return buildString {
         append("[DEBUG] App version: ").append(versionName).appendLine()
         append("[DEBUG] Version code: ").append(versionCode).appendLine()
-        append("[DEBUG] Commit hash: ").append(BuildConfig.GIT_COMMIT_HASH.substring(0, 8)).appendLine()
+        append("[DEBUG] Commit hash: ").append(BuildConfig.GIT_SHORT_COMMIT_HASH).appendLine()
 
         appendLine()
 

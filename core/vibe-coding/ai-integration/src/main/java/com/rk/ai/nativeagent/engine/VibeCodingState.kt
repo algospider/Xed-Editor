@@ -80,6 +80,13 @@ data class ToolExecutionRecord(
     val tokens: Int = 0,
 )
 
+data class PendingQuestion(
+    val id: String,
+    val question: String,
+    val context: String = "",
+    val timestamp: Long = System.currentTimeMillis(),
+)
+
 @OptIn(ExperimentalUuidApi::class)
 data class VibeCodingState(
     val messages: List<UIMessage> = emptyList(),
@@ -109,7 +116,9 @@ data class VibeCodingState(
     val debugInfo: DebugInfo? = null,
     val recentlyDeletedMessage: Pair<Int, UIMessage>? = null,
     val showSuggestions: Boolean = false,
+    val pendingQuestion: PendingQuestion? = null,
 ) {
+    val hasPendingQuestion: Boolean get() = pendingQuestion != null
     val sessionById: Map<Uuid, SessionNode> get() = sessionTree.associateBy { it.id }
     val hasSecurityAlerts: Boolean get() = securityAlerts.isNotEmpty()
     val activeAgents: List<AgentActivity> get() = agentActivities.filter {

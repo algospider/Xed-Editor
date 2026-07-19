@@ -166,6 +166,13 @@ class GenerationPipeline(
     }
 
     private suspend fun checkAndResume(buildConfig: suspend () -> GenerationConfig?) {
+        // If there's a pending question from askUser, pause and wait for user input
+        if (getState().pendingQuestion != null) {
+            onStateUpdate { copy(isProcessing = false) }
+            vibeEventBus.emit(VibeCodingEvent.GenerationFinished)
+            return
+        }
+
         if (checkAndAutoRespondPermissions()) {
             resume(buildConfig)
         } else {

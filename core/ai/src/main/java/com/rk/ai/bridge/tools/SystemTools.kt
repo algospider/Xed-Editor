@@ -14,7 +14,7 @@ class GetIdeInfoTool : BaseMcpTool() {
     override fun getDescription(): String = "Returns IDE status and a pointer to system guidelines."
     override suspend fun executeValidated(args: JsonObject, context: McpToolContext): McpToolResult {
         val info = IdeBridge.getBridgeInfo()
-        val version = runCatching { application?.packageManager?.getPackageInfo(application!!.packageName, 0)?.versionName }.getOrNull().orEmpty()
+        val version = runCatching { application?.let { app -> app.packageManager?.getPackageInfo(app.packageName, 0)?.versionName } }.getOrNull().orEmpty()
         val text = JsonObject().apply {
             addProperty("name", "Xed Editor")
             addProperty("version", version)

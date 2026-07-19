@@ -133,7 +133,7 @@ object FileTypeManager {
     fun fromFileName(name: String): FileType {
         val normalized = name.lowercase()
         val fileExt = normalized.substringAfterLast('.', "")
-        return allTypes().firstOrNull { it.names != null && normalized in it.names!! } ?: fromExtension(fileExt)
+        return allTypes().firstOrNull { it.names?.let { normalized in it } == true } ?: fromExtension(fileExt)
     }
 
     fun fromExtension(ext: String): FileType {

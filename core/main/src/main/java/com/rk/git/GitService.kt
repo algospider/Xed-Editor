@@ -16,34 +16,41 @@ class GitService {
 
     private data class GitCacheEntry(val git: Git, val createdAt: Long)
     private val repoCache = LinkedHashMap<String, GitCacheEntry>(4, 0.75f, true)
+    private val repoCacheLock = Any()
     private val repoCacheTtlMs = 10_000L
     private val repoCacheMaxSize = 8
 
     private suspend fun getRepo(workspacePath: String): Git? = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        repoCache[workspacePath]?.let {
-            if (now - it.createdAt < repoCacheTtlMs) return@withContext it.git
-            runCatching { it.git.close() }
-            repoCache.remove(workspacePath)
+        synchronized(repoCacheLock) {
+            repoCache[workspacePath]?.let {
+                if (now - it.createdAt < repoCacheTtlMs) return@withContext it.git
+                runCatching { it.git.close() }
+                repoCache.remove(workspacePath)
+            }
         }
-        runCatching {
+        val git = runCatching {
             val repoDir = File(workspacePath)
             val builder = FileRepositoryBuilder().readEnvironment().findGitDir(repoDir)
             val repo = builder.build() ?: return@runCatching null
             if (repo.directory == null) { repo.close(); return@runCatching null }
-            val git = Git(repo)
+            Git(repo)
+        }.getOrNull() ?: return@withContext null
+        synchronized(repoCacheLock) {
             repoCache[workspacePath] = GitCacheEntry(git, now)
             if (repoCache.size > repoCacheMaxSize) {
                 repoCache.keys.firstOrNull()?.let { k ->
                     repoCache[k]?.git?.close(); repoCache.remove(k)
                 }
             }
-            git
-        }.getOrNull()
+        }
+        git
     }
 
     private fun invalidateRepoCache(workspacePath: String) {
-        repoCache.remove(workspacePath)?.git?.let { runCatching { it.close() } }
+        synchronized(repoCacheLock) {
+            repoCache.remove(workspacePath)?.git?.let { runCatching { it.close() } }
+        }
     }
 
     private data class StatusCache(val path: String, val result: JsonObject, val timestamp: Long)
@@ -280,7 +287,12 @@ class GitService {
     suspend fun getGitRoot(workspacePath: String): String? = withContext(Dispatchers.IO) {
         if (workspacePath.isBlank()) return@withContext null
         runCatching {
-            FileRepositoryBuilder().findGitDir(File(workspacePath)).takeIf { it.gitDir != null }?.build()?.workTree?.canonicalPath
+            val repo = FileRepositoryBuilder().findGitDir(File(workspacePath)).takeIf { it.gitDir != null }?.build()
+            try {
+                repo?.workTree?.canonicalPath
+            } finally {
+                repo?.close()
+            }
         }.getOrNull()
     }
 }

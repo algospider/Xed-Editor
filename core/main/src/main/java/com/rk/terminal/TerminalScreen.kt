@@ -232,44 +232,46 @@ private fun ColumnScope.TerminalView(
                                 }
                             }
                         }
-                    } else if (pendingCommand != null) {
-                        val pcmd = pendingCommand!!
-                        scope.launch(Dispatchers.IO) {
-                            try {
-                                val info = binder.getSession(pcmd.id)?.let { SessionInfo(pcmd.id, "", it) }
-                                    ?: binder.createSession(pcmd.id, client, activity, activeFile, activeProject)
+                    } else {
+                        val pcmd = pendingCommand
+                        if (pcmd != null) {
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val info = binder.getSession(pcmd.id)?.let { SessionInfo(pcmd.id, "", it) }
+                                        ?: binder.createSession(pcmd.id, client, activity, activeFile, activeProject)
 
-                                withContext(Dispatchers.Main) {
-                                    service.currentSession.value = pcmd.id
-                                    info?.session?.let {
-                                        it.updateTerminalSessionClient(client)
-                                        attachSession(it)
+                                    withContext(Dispatchers.Main) {
+                                        service.currentSession.value = pcmd.id
+                                        info?.session?.let {
+                                            it.updateTerminalSessionClient(client)
+                                            attachSession(it)
+                                        }
                                     }
-                                }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                withContext(Dispatchers.Main) {
-                                    com.rk.utils.errorDialog(e)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                    withContext(Dispatchers.Main) {
+                                        com.rk.utils.errorDialog(e)
+                                    }
                                 }
                             }
-                        }
-                    } else {
-                        scope.launch(Dispatchers.IO) {
-                            try {
-                                val currentId = service.currentSession.value
-                                val info = binder.getSession(currentId)?.let { SessionInfo(currentId, "", it) }
-                                    ?: binder.createSession(currentId, client, activity, activeFile, activeProject)
+                        } else {
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val currentId = service.currentSession.value
+                                    val info = binder.getSession(currentId)?.let { SessionInfo(currentId, "", it) }
+                                        ?: binder.createSession(currentId, client, activity, activeFile, activeProject)
 
-                                withContext(Dispatchers.Main) {
-                                    info?.session?.let {
-                                        it.updateTerminalSessionClient(client)
-                                        attachSession(it)
+                                    withContext(Dispatchers.Main) {
+                                        info?.session?.let {
+                                            it.updateTerminalSessionClient(client)
+                                            attachSession(it)
+                                        }
                                     }
-                                }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                withContext(Dispatchers.Main) {
-                                    com.rk.utils.errorDialog(e)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                    withContext(Dispatchers.Main) {
+                                        com.rk.utils.errorDialog(e)
+                                    }
                                 }
                             }
                         }

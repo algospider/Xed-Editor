@@ -11,15 +11,17 @@ object PlanManager {
     @Volatile
     private var active: Plan? = null
 
+    private val lock = Any()
+
     // ── queries ──────────────────────────────────────────────────────────────
 
     fun getActive(): Plan? = active
 
-    fun isPlanActive(): Boolean = active != null && active!!.status == PlanStatus.ACTIVE
+    fun isPlanActive(): Boolean = active?.status == PlanStatus.ACTIVE
 
-    fun isAwaitingApproval(): Boolean = active != null && active!!.status == PlanStatus.AWAITING_APPROVAL
+    fun isAwaitingApproval(): Boolean = active?.status == PlanStatus.AWAITING_APPROVAL
 
-    fun isInPlanMode(): Boolean = active != null && active!!.status in setOf(
+    fun isInPlanMode(): Boolean = active?.status in setOf(
         PlanStatus.ACTIVE, PlanStatus.AWAITING_APPROVAL,
     )
 
@@ -29,7 +31,7 @@ object PlanManager {
         title: String,
         description: String = "",
         stepDescriptions: List<Pair<String, String>>,
-    ): Plan {
+    ): Plan = synchronized(lock) {
         val steps = stepDescriptions.mapIndexed { i, (desc, details) ->
             PlanStep(id = "step-${i + 1}", description = desc, details = details)
         }
@@ -40,36 +42,36 @@ object PlanManager {
             steps = steps,
             status = PlanStatus.AWAITING_APPROVAL,
         ).also { active = it }
-        return plan
+        plan
     }
 
-    fun approvePlan(): Plan? {
-        val p = active ?: return null
+    fun approvePlan(): Plan? = synchronized(lock) {
+        val p = active ?: return@synchronized null
         val approved = p.copy(
             status = PlanStatus.ACTIVE,
             approvedAt = System.currentTimeMillis(),
         ).also { active = it }
-        return approved
+        approved
     }
 
-    fun rejectPlan(reason: String = ""): Plan {
+    fun rejectPlan(reason: String = ""): Plan = synchronized(lock) {
         val p = active?.copy(status = PlanStatus.DRAFT) ?: Plan(
             id = "empty", title = "", steps = emptyList(), status = PlanStatus.DRAFT,
         )
         active = p
-        return p
+        p
     }
 
-    fun cancelPlan(): Plan? {
+    fun cancelPlan(): Plan? = synchronized(lock) {
         val p = active?.copy(status = PlanStatus.CANCELLED)
         active = null
-        return p
+        p
     }
 
-    fun updateStep(stepId: String, status: StepStatus, result: String? = null): Plan? {
-        val p = active ?: return null
+    fun updateStep(stepId: String, status: StepStatus, result: String? = null): Plan? = synchronized(lock) {
+        val p = active ?: return@synchronized null
         val idx = p.steps.indexOfFirst { it.id == stepId }
-        if (idx < 0) return null
+        if (idx < 0) return@synchronized null
 
         val newSteps = p.steps.toMutableList().apply {
             set(idx, get(idx).copy(status = status, result = result))
@@ -80,11 +82,11 @@ object PlanManager {
             status = if (allDone) PlanStatus.COMPLETED else PlanStatus.ACTIVE,
             completedAt = if (allDone) System.currentTimeMillis() else null,
         )
-        return active
+        active
     }
 
     fun updateStepByDescription(desc: String, status: StepStatus, result: String? = null): Plan? {
-        val p = active ?: return null
+        val p = synchronized(lock) { active } ?: return null
         val idx = p.steps.indexOfFirst { it.description == desc || it.id == desc }
         if (idx < 0) return null
         return updateStep(p.steps[idx].id, status, result)
@@ -137,5 +139,5 @@ object PlanManager {
         }
     }
 
-    fun clear() { active = null }
+    fun clear() { synchronized(lock) { active = null } }
 }

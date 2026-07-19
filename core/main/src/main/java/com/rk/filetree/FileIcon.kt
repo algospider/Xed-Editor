@@ -166,7 +166,7 @@ fun getDrawableFileIcon(
     val icon = if (isDirectory) folder else getBuiltInFileIcon(fileName)
 
     val builtinIcon = icon.getDrawable(context)
-    val iconPackIcon = iconPackFile?.inputStream()?.let { loadSvg(it) }
+    val iconPackIcon = iconPackFile?.inputStream()?.use { loadSvg(it) }
 
     return iconPackIcon ?: builtinIcon
 }

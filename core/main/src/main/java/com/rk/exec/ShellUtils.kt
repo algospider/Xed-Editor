@@ -124,10 +124,11 @@ object ShellUtils {
         onLine: (String) -> Unit,
     ) {
         BufferedReader(InputStreamReader(stream), BUFFER_SIZE).use { reader ->
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
+            var line = reader.readLine()
+            while (line != null) {
                 sb.appendLine(line)
-                onLine(line!!)
+                onLine(line)
+                line = reader.readLine()
             }
         }
     }

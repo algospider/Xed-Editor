@@ -103,7 +103,8 @@ class LspService(
                     val edits = workspaceEdit.changes[tab.file.toUri().toString()]
                     if (edits != null) {
                         withContext(Dispatchers.Main) {
-                            connector.getEventManager()!!.emitAsync(EventType.applyEdits) {
+                            val eventManager = connector.getEventManager() ?: return@withContext
+                            eventManager.emitAsync(EventType.applyEdits) {
                                 put("edits", edits); put(editor.text)
                             }
                             com.rk.utils.toast("Symbol renamed (local file only)")

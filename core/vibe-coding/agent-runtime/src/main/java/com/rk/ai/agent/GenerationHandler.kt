@@ -11,14 +11,10 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -69,44 +65,8 @@ import kotlin.uuid.ExperimentalUuidApi
 private const val TAG = "GenerationHandler"
 private const val DOOM_LOOP_THRESHOLD = 3
 private const val MAX_COMPACTIONS = 5
-private const val MAX_TOOL_OUTPUT_CHARS = 80_000
-private const val TOOL_OUTPUT_TRUNCATION_SUFFIX = "\n\n[Output truncated at $MAX_TOOL_OUTPUT_CHARS characters]"
 private val WRITE_TOOLS = setOf("editFile", "writeFile", "multiEditFile", "applyBatchEdits", "readAndEdit", "createFile")
 private const val MAX_DOOM_LOOP_STRATEGIES = 3
-
-@Serializable
-sealed interface GenerationChunk {
-    data class Messages(
-        val messages: List<UIMessage>
-    ) : GenerationChunk
-
-    data class CompactionNeeded(
-        val reason: String,
-    ) : GenerationChunk
-
-    data class ToolStateChanged(
-        val toolCallId: String,
-        val toolName: String,
-        val executionState: ExecutionState,
-    ) : GenerationChunk
-
-    data class StepStarted(
-        val stepIndex: Int,
-    ) : GenerationChunk
-
-    data class StepFinished(
-        val stepIndex: Int,
-        val cost: Float = 0f,
-        val inputTokens: Int = 0,
-        val outputTokens: Int = 0,
-        val reasoningTokens: Int = 0,
-    ) : GenerationChunk
-
-    data class GenerationError(
-        val errorMessage: String,
-        val errorType: String = "UnknownError",
-    ) : GenerationChunk
-}
 
 class GenerationHandler(
     private val context: Context,
@@ -274,7 +234,7 @@ class GenerationHandler(
                     }
                     // Check finish reason from the message's choices (handled via handleMessageChunk)
                     // If the model stopped with "length" finish reason, compact and retry
-                    val hasLengthFinish = checkFinishReason(messages, lastFinishReason)
+                    val hasLengthFinish = ToolOutputFormatter.checkFinishReason(messages, lastFinishReason)
                     if (hasLengthFinish) {
                         Log.w(TAG, "Model stopped with 'length' finish reason, compacting...")
                         if (compactionCount < MAX_COMPACTIONS) {
@@ -298,7 +258,7 @@ class GenerationHandler(
                         toolDef != null && toolDef.needsApproval && tool.approvalState is ToolApprovalState.Auto -> {
                             hasPendingApproval = true
                             var meta = tool.metadata
-                            val diff = computeDiffPreview(tool.toolName, tool.input)
+                            val diff = ToolOutputFormatter.computeDiffPreview(tool.toolName, tool.input, json)
                             if (diff != null) {
                                 meta = buildJsonObject {
                                     meta?.let { m -> m.forEach { (k, v) -> put(k, v) } }
@@ -396,7 +356,7 @@ class GenerationHandler(
                         contextMemory?.addFact("Executed ${et.toolName} successfully")
                         val filePath = et.output.firstNotNullOfOrNull { part ->
                             if (part is UIMessagePart.Text) {
-                                extractFilePath(et.input)
+                                ToolOutputFormatter.extractFilePath(et.input)
                             } else null
                         }
                         if (filePath != null) {
@@ -413,7 +373,7 @@ class GenerationHandler(
             // Post-edit verification: if write tools were used, inject a verify hint
             val writtenFiles = executedTools
                 .filter { it.toolName in WRITE_TOOLS && it.executionState is ExecutionState.Completed }
-                .mapNotNull { extractFilePath(it.input) }
+                .mapNotNull { ToolOutputFormatter.extractFilePath(it.input) }
                 .distinct()
             if (writtenFiles.isNotEmpty()) {
                 val verifyHint = UIMessage(
@@ -655,8 +615,8 @@ class GenerationHandler(
                 when (part) {
                     is UIMessagePart.Text -> {
                         val text = part.text
-                        if (text.length > MAX_TOOL_OUTPUT_CHARS) {
-                            part.copy(text = smartTruncateToolOutput(text, MAX_TOOL_OUTPUT_CHARS))
+                        if (text.length > ToolOutputFormatter.MAX_TOOL_OUTPUT_CHARS) {
+                            part.copy(text = ToolOutputFormatter.smartTruncateToolOutput(text, ToolOutputFormatter.MAX_TOOL_OUTPUT_CHARS))
                         } else part
                     }
                     else -> part
@@ -725,132 +685,6 @@ class GenerationHandler(
     /** Execute [action] under [mutex] if provided, or directly otherwise. */
     private suspend fun withMemoryLogging(mutex: kotlinx.coroutines.sync.Mutex?, action: suspend () -> Unit) {
         if (mutex != null) mutex.withLock { action() } else action()
-    }
-
-    private fun extractFilePath(input: String): String? {
-        val patterns = listOf(
-            Regex("""filePath["\s:=]+([^"\,}\s]+)"""),
-            Regex("""path["\s:=]+([^"\,}\s]+)"""),
-            Regex("""file["\s:=]+([^"\,}\s]+)"""),
-        )
-        for (pattern in patterns) {
-            val match = pattern.find(input)
-            if (match != null) {
-                val path = match.groupValues[1].trim()
-                if (path.startsWith("/") || path.contains(".")) return path
-            }
-        }
-        return null
-    }
-
-    private fun computeDiffPreview(toolName: String, args: String): String? {
-        try {
-            val obj = json.parseToJsonElement(args.ifBlank { "{}" }).jsonObject
-            when (toolName) {
-                "writeFile" -> {
-                    val filePath = obj["filePath"]?.jsonPrimitive?.content ?: return null
-                    val newContent = obj["content"]?.jsonPrimitive?.content ?: return null
-                    val fileName = filePath.substringAfterLast("/")
-                    return "--- a/$fileName\n+++ b/$fileName\n@@ Entire File Content @@\n" +
-                           newContent.take(2000) + if(newContent.length > 2000) "\n... [truncated]" else ""
-                }
-                "editFile" -> {
-                    val filePath = obj["filePath"]?.jsonPrimitive?.content ?: return null
-                    val oldString = obj["oldString"]?.jsonPrimitive?.content ?: return null
-                    val newString = obj["newString"]?.jsonPrimitive?.content ?: return null
-                    val fileName = filePath.substringAfterLast("/")
-                    return "--- a/$fileName\n+++ b/$fileName\n@@ Edit chunk @@\n" +
-                           oldString.lines().joinToString("\n") { "-$it" } + "\n" +
-                           newString.lines().joinToString("\n") { "+$it" }
-                }
-                "multiEditFile" -> {
-                    val filePath = obj["filePath"]?.jsonPrimitive?.content ?: return null
-                    val fileName = filePath.substringAfterLast("/")
-                    val edits = obj["edits"]?.jsonArray ?: return null
-                    var diff = "--- a/$fileName\n+++ b/$fileName\n"
-                    for (i in 0 until edits.size) {
-                        val edit = edits[i].jsonObject
-                        val oldString = edit["oldString"]?.jsonPrimitive?.content ?: ""
-                        val newString = edit["newString"]?.jsonPrimitive?.content ?: ""
-                        diff += "@@ Edit chunk ${i+1} @@\n" +
-                                oldString.lines().joinToString("\n") { "-$it" } + "\n" +
-                                newString.lines().joinToString("\n") { "+$it" } + "\n"
-                    }
-                    return diff
-                }
-            }
-        } catch (e: Exception) {
-            // ignore
-        }
-        return null
-    }
-
-    private fun checkFinishReason(messages: List<UIMessage>, finishReason: String?): Boolean {
-        if (messages.isEmpty()) return false
-        if (finishReason == "length") return true
-        val lastMsg = messages.lastOrNull() ?: return false
-        val lastPart = lastMsg.parts.lastOrNull()
-        return lastPart is UIMessagePart.Text && lastPart.text.contains("[length]")
-    }
-
-    private fun smartTruncateToolOutput(text: String, maxChars: Int): String {
-        val headBudget = (maxChars * 0.6).toInt()
-        val tailBudget = (maxChars * 0.2).toInt()
-        val diagBudget = maxChars - headBudget - tailBudget
-
-        val lines = text.lines()
-        if (lines.size <= 10) return text.take(maxChars) + TOOL_OUTPUT_TRUNCATION_SUFFIX
-
-        val headLines = mutableListOf<String>()
-        var headChars = 0
-        for (line in lines) {
-            if (headChars + line.length > headBudget && headLines.isNotEmpty()) break
-            headLines.add(line)
-            headChars += line.length + 1
-        }
-
-        val tailLines = mutableListOf<String>()
-        var tailChars = 0
-        for (line in lines.reversed()) {
-            if (tailChars + line.length > tailBudget && tailLines.isNotEmpty()) break
-            tailLines.add(line)
-            tailChars += line.length + 1
-        }
-        tailLines.reverse()
-
-        val middleStart = headLines.size
-        val middleEnd = lines.size - tailLines.size
-        val diagLines = mutableListOf<String>()
-        var diagChars = 0
-        if (middleStart < middleEnd) {
-            for (i in middleStart until middleEnd) {
-                val line = lines[i]
-                if (line.contains("error", ignoreCase = true) ||
-                    line.contains("exception", ignoreCase = true) ||
-                    line.contains("FAILED", ignoreCase = true) ||
-                    line.contains("warning:", ignoreCase = true) ||
-                    line.matches(Regex("^\\s*(at |Caused by|\\d+\\))"))) {
-                    if (diagChars + line.length <= diagBudget) {
-                        diagLines.add(line)
-                        diagChars += line.length + 1
-                    }
-                }
-            }
-        }
-
-        val omitted = middleEnd - middleStart - diagLines.size
-        return buildString {
-            append(headLines.joinToString("\n"))
-            appendLine()
-            appendLine("\n[... $omitted lines omitted ...]")
-            if (diagLines.isNotEmpty()) {
-                appendLine("\n[Key lines from omitted section:]")
-                append(diagLines.joinToString("\n"))
-                appendLine()
-            }
-            append(tailLines.joinToString("\n"))
-            append(TOOL_OUTPUT_TRUNCATION_SUFFIX)
-        }
     }
 
     private suspend fun generateInternal(

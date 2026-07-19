@@ -192,7 +192,7 @@ class DocumentProvider : DocumentsProvider() {
         var docId = docId
         var file = file
         if (docId == null) {
-            docId = getDocIdForFile(file!!)
+            docId = getDocIdForFile(file ?: throw FileNotFoundException("file is null"))
         } else {
             file = getFileForDocId(docId)
         }

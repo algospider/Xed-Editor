@@ -124,6 +124,75 @@ class RecoveryEngine {
         return null
     }
 
+    /**
+     * Executes a recovery action and returns true if the error condition was resolved.
+     * The caller should retry the failed operation after a successful recovery.
+     */
+    fun executeRecovery(action: RecoveryAction): Boolean {
+        return when (action.action) {
+            "create_directory" -> {
+                val path = action.params["path"]
+                if (path != null) {
+                    try {
+                        val dir = File(path)
+                        val created = dir.mkdirs()
+                        if (created) {
+                            Log.i(TAG, "Recovery: created directory $path")
+                            true
+                        } else if (dir.exists()) {
+                            Log.i(TAG, "Recovery: directory already exists $path")
+                            true
+                        } else {
+                            Log.w(TAG, "Recovery: failed to create directory $path")
+                            false
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Recovery: exception creating directory $path", e)
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+
+            "retry_with_timeout" -> {
+                // Always returns true — the caller should retry with a fresh timeout
+                Log.i(TAG, "Recovery: retrying with fresh timeout")
+                true
+            }
+
+            "skip_missing_file" -> {
+                // Inform the caller to skip this operation; the file doesn't exist
+                Log.i(TAG, "Recovery: skipping missing file: ${action.params["path"]}")
+                true
+            }
+
+            "permission_error" -> {
+                // Cannot auto-resolve permission errors — report and let the caller decide
+                Log.w(TAG, "Recovery: permission error at ${action.params["path"]} — cannot auto-resolve")
+                false
+            }
+
+            "fix_json" -> {
+                // JSON format issues need LLM intervention, not auto-fixable here
+                Log.w(TAG, "Recovery: JSON error — needs LLM intervention, not auto-fixing")
+                false
+            }
+
+            else -> {
+                Log.w(TAG, "Recovery: unknown action '${action.action}'")
+                false
+            }
+        }
+    }
+
+    /**
+     * @return true if this error type justifies retrying the tool after recovery.
+     */
+    fun shouldRetryAfterRecovery(action: RecoveryAction): Boolean {
+        return action.action in setOf("create_directory", "retry_with_timeout")
+    }
+
     companion object {
         val AUTO_RETRYABLE_TOOLS = setOf(
             "readFile", "readFiles", "cat", "writeFile", "editFile",

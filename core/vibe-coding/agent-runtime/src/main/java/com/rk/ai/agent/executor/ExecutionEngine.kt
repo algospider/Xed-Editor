@@ -50,6 +50,7 @@ class ExecutionEngine(
     private val selfReviewer = SelfReviewer()
     private val loopDetector = InfiniteLoopDetector()
     private val recoveryEngine = RecoveryEngine()
+    private val checkpointManager = CheckpointManager()
     private val hookManager = HookManager()
     private var knowledgeBase: ProjectKnowledgeBase? = null
 
@@ -155,6 +156,14 @@ class ExecutionEngine(
                     continue
                 }
 
+                // Create checkpoint before file-modifying operations
+                if (toolCall.name in FILE_MODIFYING_TOOLS) {
+                    val filePath = extractFilePath(toolCall.input)
+                    if (filePath != null) {
+                        checkpointManager.checkpoint(filePath)
+                    }
+                }
+
                 val result = withTimeout(timeoutMs) {
                     toolDef.execute(args)
                 }
@@ -217,14 +226,59 @@ class ExecutionEngine(
                     " (recovery: ${recoveryAction.message})"
                 } else ""
 
+                if (recoveryAction != null && recoveryEngine.isRetryable(toolCall.name, e.message ?: "")) {
+                    val recovered = recoveryEngine.executeRecovery(recoveryAction)
+                    if (recovered && recoveryEngine.shouldRetryAfterRecovery(recoveryAction)) {
+                        contextMemory.log("Recovery succeeded, retrying ${toolCall.name}")
+                        try {
+                            val args = JsonParser.parseString(toolCall.input.ifBlank { "{}" })
+                            val retryResult = withTimeout(timeoutMs) {
+                                toolDef.execute(args)
+                            }
+                            val retryDuration = System.currentTimeMillis() - execStart
+                            toolRouter.recordExecution(toolCall.name, toolCall.input, retryDuration, true, false)
+                            val retryReview = selfReviewer.reviewToolResults(
+                                toolCall.name, toolCall.input, retryResult,
+                                ExecutionState.Completed(toolCall.name), context,
+                            )
+                            if (retryReview.passed || retryReview.score >= 50) {
+                                toolCache.put(toolCall.name, argsHash, retryResult)
+                                contextMemory.log("Recovery retry succeeded for ${toolCall.name}")
+                                continue // skip adding to errors
+                            }
+                        } catch (retryException: Exception) {
+                            contextMemory.log("Recovery retry also failed: ${retryException.message}")
+                            errors.add("${toolCall.name}: ${e.message} (recovery attempted but retry failed: ${retryException.message})")
+                            Log.w(TAG, "Recovery retry failed: ${toolCall.name}", retryException)
+                            continue
+                        }
+                    }
+                }
+
                 errors.add("${toolCall.name}: ${e.message}$recoveryMsg")
                 Log.w(TAG, "Tool execution failed: ${toolCall.name}", e)
             }
         }
 
+        val isSuccessful = errors.size <= VibeCodingConstants.MAX_CONSECUTIVE_ERRORS
+
+        // Roll back files if the task failed and there are checkpoints
+        if (!isSuccessful && checkpointManager.hasChanges) {
+            val restored = checkpointManager.restore()
+            if (restored > 0) {
+                contextMemory.log("Rolled back $restored file(s) after task failure")
+            }
+            modifiedFiles.clear()
+        }
+
+        // Clean up checkpoints after task completion
+        if (checkpointManager.hasChanges) {
+            checkpointManager.cleanup()
+        }
+
         return ExecutionResult(
             taskId = task.id,
-            success = errors.size <= VibeCodingConstants.MAX_CONSECUTIVE_ERRORS,
+            success = isSuccessful,
             message = "Completed in ${System.currentTimeMillis() - startTime}ms",
             modifiedFiles = modifiedFiles.distinct(),
             errors = errors,
@@ -351,6 +405,16 @@ class ExecutionEngine(
         return null
     }
 }
+
+/** Names of tools that modify the filesystem — checkpoints are created before these execute. */
+private val FILE_MODIFYING_TOOLS = setOf(
+    "writeFile", "editFile", "multiEditFile", "applyBatchEdits",
+    "createFile", "deleteFile", "renameFile", "moveFile",
+    "overwriteFile", "appendFile",
+)
+
+/** Maximum recovery/restore attempts per task. */
+private const val MAX_RECOVERY_ATTEMPTS = 2
 
 data class ToolCallInfo(
     val name: String,

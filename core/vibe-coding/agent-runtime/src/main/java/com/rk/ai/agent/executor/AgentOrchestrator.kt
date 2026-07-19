@@ -44,6 +44,7 @@ class AgentOrchestrator(
 ) {
     private var currentPhase: AgentPhase = AgentPhase.IDLE
     private var onPhaseChange: ((AgentPhase) -> Unit)? = null
+    private var onProgress: ((String) -> Unit)? = null
     private var runningJob: Job? = null
 
     fun setRunningJob(job: Job) {
@@ -54,7 +55,16 @@ class AgentOrchestrator(
         onPhaseChange = listener
     }
 
+    fun setProgressListener(listener: (String) -> Unit) {
+        onProgress = listener
+    }
+
     fun getPhase(): AgentPhase = currentPhase
+
+    private fun reportProgress(message: String) {
+        contextMemory.log(message)
+        onProgress?.invoke(message)
+    }
 
     suspend fun execute(
         goal: String,
@@ -69,14 +79,14 @@ class AgentOrchestrator(
             // Phase 1: Index project
             setPhase(AgentPhase.INDEXING)
             val workspace = ideService.getPrimaryWorkspacePath()
-            contextMemory.log("Starting orchestration for: $goal")
-            contextMemory.log("Indexing project: $workspace")
+            reportProgress("🔍 Starting orchestration for: $goal")
+            reportProgress("📚 Indexing project: $workspace")
             executionEngine.initialize(workspace)
             contextMemory.addFact("Project indexed for goal: $goal")
 
             // Phase 2: Analyze
             setPhase(AgentPhase.ANALYZING)
-            contextMemory.log("Analyzing project structure")
+            reportProgress("🔎 Analyzing project structure")
             val summary = ideService.getProjectConfig(workspace).toString()
             val structure = ideService.getProjectStructure(workspace, 3, 200)
             contextMemory.storeProjectInfo(summary, structure)
@@ -84,21 +94,23 @@ class AgentOrchestrator(
 
             // Phase 3: Plan
             setPhase(AgentPhase.PLANNING)
-            contextMemory.log("Creating execution plan")
+            reportProgress("📋 Creating execution plan")
             var taskTree = taskPlanner.createPlan(goal, null)
             contextMemory.working.setTaskTree(taskTree)
-            contextMemory.addFact("Plan created with ${taskTree.totalCount} steps")
+            reportProgress("📋 Plan created with ${taskTree.totalCount} steps")
 
             // Phase 4: Execute each task
             setPhase(AgentPhase.EXECUTING)
             var taskResult: ExecutionResult
+            var completedCount = 0
+            var failedCount = 0
             do {
                 if (!coroutineContext.isActive) {
-                    contextMemory.log("Orchestration cancelled")
+                    reportProgress("⏹️ Orchestration cancelled")
                     break
                 }
                 val nextTask = taskTree.nextExecutable() ?: break
-                contextMemory.log("Executing: ${nextTask.title}")
+                reportProgress("⚡ Executing task ${completedCount + failedCount + 1}/${taskTree.totalCount}: ${nextTask.title}")
                 contextMemory.working.setCurrentTask(nextTask)
 
                 taskTree = taskTree.updateTask(nextTask.id) { copy(status = TaskStatus.IN_PROGRESS) }
@@ -111,23 +123,29 @@ class AgentOrchestrator(
                 )
 
                 if (taskResult.success) {
+                    completedCount++
                     taskTree = taskTree.updateTask(nextTask.id) {
                         copy(status = TaskStatus.COMPLETED, result = taskResult.message)
                     }
                     contextMemory.working.setTaskTree(taskTree)
                     allModifiedFiles.addAll(taskResult.modifiedFiles)
-                    contextMemory.log("Completed: ${nextTask.title}")
+                    if (taskResult.modifiedFiles.isNotEmpty()) {
+                        reportProgress("✅ Completed: ${nextTask.title} (${taskResult.modifiedFiles.size} file(s) modified)")
+                    } else {
+                        reportProgress("✅ Completed: ${nextTask.title}")
+                    }
                 } else {
+                    failedCount++
                     taskTree = taskTree.updateTask(nextTask.id) {
                         copy(status = TaskStatus.FAILED, error = taskResult.errors.joinToString(", "))
                     }
                     contextMemory.working.setTaskTree(taskTree)
                     allErrors.addAll(taskResult.errors)
-                    contextMemory.log("Failed: ${nextTask.title}")
+                    reportProgress("❌ Failed: ${nextTask.title} — ${taskResult.errors.firstOrNull()?.take(100) ?: "unknown error"}")
                 }
 
                 if (allErrors.size > 5) {
-                    contextMemory.log("Too many errors, aborting")
+                    reportProgress("⚠️ Too many errors ($failedCount failed), aborting orchestration")
                     break
                 }
             } while (!taskTree.isComplete)
@@ -135,12 +153,15 @@ class AgentOrchestrator(
             // Phase 5: Verify
             if (allErrors.isEmpty()) {
                 setPhase(AgentPhase.VERIFYING)
-                contextMemory.log("Verifying changes")
+                reportProgress("✅ All tasks completed. Verifying changes...")
+            } else {
+                reportProgress("⚠️ $completedCount tasks completed, $failedCount tasks failed")
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "Orchestration failed", e)
             allErrors.add("Fatal: ${e.message}")
+            reportProgress("💥 Orchestration failed: ${e.message}")
             setPhase(AgentPhase.FAILED)
         }
 
