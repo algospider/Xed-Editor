@@ -9,6 +9,7 @@ import com.rk.ai.agent.files.XedConfig
 import com.rk.ai.agent.files.XedConfigLoader
 import com.rk.ai.agent.hooks.HookContext
 import com.rk.ai.agent.hooks.HookEvent
+import com.rk.ai.agent.hooks.HookManager
 import com.rk.ai.agent.hooks.HookResult
 import com.rk.ai.service.IdeService
 import java.io.File

@@ -21,11 +21,13 @@ import com.rk.ai.persistence.settings.SettingsStore
 import com.rk.ai.persistence.settings.getCurrentAssistant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -276,7 +278,7 @@ class VibeCodingToolDefinitions(
             updateState { copy(pendingQuestion = PendingQuestion(id = pendingId, question = question, context = context)) }
 
             val display = buildString {
-                appendLine("\u{1F914} **Question for you:**")
+                appendLine("🤔 **Question for you:**")
                 appendLine()
                 appendLine(question)
                 if (context.isNotBlank()) {
@@ -368,7 +370,7 @@ class VibeCodingToolDefinitions(
                     ?: return@Tool listOf(UIMessagePart.Text("Missing 'calls' array"))
                 val toolMap = dispatchTools.associateBy { it.name }
 
-                val results = coroutineScope {
+                val results: List<List<UIMessagePart>> = coroutineScope {
                     calls.map { callElement ->
                         async {
                             val callObj = runCatching { callElement.asJsonObject }.getOrElse {
