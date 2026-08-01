@@ -191,11 +191,11 @@ class FileWrapper(var file: File) : FileObject {
     }
 
     override suspend fun readText(): String {
-        return file.readText()
+        return withContext(Dispatchers.IO) { file.readText() }
     }
 
     override suspend fun readText(charset: Charset): String {
-        return file.readText(charset = charset)
+        return withContext(Dispatchers.IO) { file.readText(charset = charset) }
     }
 
     override fun isSymlink(): Boolean {

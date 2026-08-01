@@ -122,11 +122,15 @@ class NetWrapper(private val url: URL) : FileObject {
     }
 
     override suspend fun readText(): String {
-        return getInputStream().bufferedReader().use { it.readText() }
+        return withContext(Dispatchers.IO) {
+            getInputStream().bufferedReader().use { it.readText() }
+        }
     }
 
     override suspend fun readText(charset: Charset): String {
-        return getInputStream().reader(charset).use { it.readText() }
+        return withContext(Dispatchers.IO) {
+            getInputStream().reader(charset).use { it.readText() }
+        }
     }
 
     override suspend fun writeText(content: String, charset: Charset): Boolean = false
