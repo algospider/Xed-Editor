@@ -120,6 +120,14 @@ class LspConnector(
     var lspEditor: LspEditor? = null
     private var beforeConnectJob: kotlinx.coroutines.Job? = null
 
+    /**
+     * Cached server capabilities, populated after a successful connection.
+     * `getCapabilities()` reads this instead of blocking the calling thread,
+     * since the text-action `shouldShow` lambdas run on the main thread.
+     */
+    @Volatile
+    private var cachedCapabilities: ServerCapabilities? = null
+
     companion object {
         private val projectCache = ConcurrentHashMap<String, LspProject>()
     }
@@ -168,6 +176,7 @@ class LspConnector(
             try {
                 lspEditor?.apply {
                     connectWithTimeout()
+                    cachedCapabilities = runCatching { requestManager.capabilities }.getOrNull()
                     requestManager.didChangeWorkspaceFolders(
                         DidChangeWorkspaceFoldersParams().apply {
                             event =
@@ -368,6 +377,9 @@ class LspConnector(
 
     fun getCapabilities(): ServerCapabilities? {
         if (!isConnected()) return null
+        // Prefer the cache populated on connect — avoids a main-thread runBlocking
+        // stall whenever the text-action toolbar evaluates its `shouldShow` lambdas.
+        cachedCapabilities?.let { return it }
         return runCatching {
             runBlocking {
                 withTimeoutOrNull(100) { lspEditor?.requestManager?.capabilities }
