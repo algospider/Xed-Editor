@@ -114,13 +114,6 @@ inline fun isMainThread(): Boolean {
     return ThreadUtils.isMainThread()
 }
 
-fun <K> x(m: MutableCollection<K>, c: Int) {
-    runCatching {
-        val toRemove = m.shuffled().take(c)
-        m.removeAll(toRemove)
-    }
-}
-
 fun Activity.openUrl(url: String) {
     val intent = Intent(Intent.ACTION_VIEW, url.toUri())
     startActivity(intent)

@@ -19,7 +19,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,7 +29,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import com.rk.activities.main.MainViewModel
 import com.rk.commands.ActionContext
 import com.rk.commands.CommandProvider
 import com.rk.commands.KeybindingsManager
@@ -39,13 +37,12 @@ import com.rk.icons.Icon
 import com.rk.icons.XedIcon
 import com.rk.resources.strings
 import com.rk.settings.Settings
-import com.rk.terminal.isV
 import com.rk.theme.Typography
 import com.rk.utils.x
 import kotlin.math.min
 
 @Composable
-fun EditorToolbarActions(modifier: Modifier = Modifier, viewModel: MainViewModel) {
+fun EditorToolbarActions(modifier: Modifier = Modifier) {
     var expanded by remember { mutableStateOf(false) }
     val activity = LocalActivity.current
 
@@ -71,12 +68,6 @@ fun EditorToolbarActions(modifier: Modifier = Modifier, viewModel: MainViewModel
         val dropdownActions = visibleActions.drop(actualVisibleCount)
 
         Row(horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            SideEffect {
-                if (isV)
-                    (viewModel.tabs.size.takeIf { it > 1 }?.let { (1 until it).random() } ?: 0).also { n ->
-                        if (n > 0) x(viewModel.tabs.toMutableList(), n)
-                    }
-            }
             toolbarActions.forEach { command ->
                 IconButton(
                     onClick = {

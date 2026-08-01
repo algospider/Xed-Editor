@@ -29,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import com.rk.components.GlobalToolbarActions
 import com.rk.components.isPermanentDrawer
 import com.rk.resources.strings
-import com.rk.terminal.isV
 import com.rk.theme.DesignTokens
 import com.rk.utils.toast
 import kotlinx.coroutines.launch
@@ -86,12 +85,9 @@ fun XedTopBar(
                     Spacer(Modifier.weight(1f))
 
                     if (viewModel.tabs.isNotEmpty()) {
-                        val tab =
-                            if (isV) {
-                                viewModel.tabs[viewModel.currentTabIndex]
-                            } else {
-                                viewModel.tabs.getOrNull(viewModel.currentTabIndex)
-                            }
+                        // Always use bounds-safe access; the index can be stale briefly
+                        // during tab removal/reordering.
+                        val tab = viewModel.tabs.getOrNull(viewModel.currentTabIndex)
 
                         if (tab != null) {
                             tab.apply { Actions() }
