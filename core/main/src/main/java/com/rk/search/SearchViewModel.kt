@@ -70,6 +70,7 @@ class SearchViewModel : ViewModel() {
         const val MAX_CODE_RESULTS = 10_000 // Max amount of code search results to show in UI
         private const val MAX_FILE_SIZE_SEARCH = 10_000_000 // Max size for code search (10 MB)
         private const val CODE_BATCH_SIZE = 5_000 // Insert code mid-traversal in chunks to avoid OOM
+        private const val MAX_HIGHLIGHTED_RESULTS = 500 // Above this, skip syntax highlighting for speed
     }
 
     fun cleanupJobs(projectRoot: FileObject) {
@@ -512,12 +513,16 @@ class SearchViewModel : ViewModel() {
         lineIndex: Int,
         isOpen: Boolean = false,
     ): CodeItem {
+        // For large result sets, skip syntax highlighting to keep search responsive.
+        // The match-range background highlight is preserved via highlightSyntax=false.
+        val highlightSyntax = totalCodeSearchResults < MAX_HIGHLIGHTED_RESULTS
         val snippetResult =
             SnippetBuilder(context)
                 .generateSnippet(
                     text = text,
                     highlight = Highlight(charIndex, charIndex + query.length),
                     fileExt = file.getExtension(),
+                    highlightSyntax = highlightSyntax,
                 )
 
         val codeItem =

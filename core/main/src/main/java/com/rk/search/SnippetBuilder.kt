@@ -32,7 +32,12 @@ class SnippetBuilder(private val context: Context) {
      *
      * @return A [Pair] containing the [AnnotatedString] and the start index of the highlighted text.
      */
-    suspend fun generateSnippet(text: String, highlight: Highlight, fileExt: String): Snippet {
+    suspend fun generateSnippet(
+        text: String,
+        highlight: Highlight,
+        fileExt: String,
+        highlightSyntax: Boolean = true,
+    ): Snippet {
         return withContext(Dispatchers.Default) {
             val trimmedTargetLine = text.trim()
             val leadingWhitespace = text.indexOf(trimmedTargetLine)
@@ -40,14 +45,21 @@ class SnippetBuilder(private val context: Context) {
             val rangeStartTrimmed = highlight.startIndex - leadingWhitespace
             val rangeEndTrimmed = highlight.endIndex - leadingWhitespace
 
-            val highlightedSpanned =
-                MarkdownCodeHighlighterRegistry.global.highlightAsync(
-                    code = trimmedTargetLine,
-                    language = fileExt,
-                    codeTypeface = Typeface.MONOSPACE,
-                )
-
-            val highlightedAnnotated = (highlightedSpanned as? Spannable)?.toAnnotatedString() ?: highlightedSpanned
+            // Skip the expensive TextMate tokenizer for large result sets — the
+            // match-range background highlight alone keeps results scannable and
+            // the search responsive (syntax highlighting is purely cosmetic here).
+            val highlightedAnnotated =
+                if (highlightSyntax) {
+                    val highlightedSpanned =
+                        MarkdownCodeHighlighterRegistry.global.highlightAsync(
+                            code = trimmedTargetLine,
+                            language = fileExt,
+                            codeTypeface = Typeface.MONOSPACE,
+                        )
+                    (highlightedSpanned as? Spannable)?.toAnnotatedString() ?: highlightedSpanned
+                } else {
+                    AnnotatedString(trimmedTargetLine)
+                }
 
             val backgroundColor =
                 getSelectionColor()

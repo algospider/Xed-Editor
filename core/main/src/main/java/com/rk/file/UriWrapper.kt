@@ -66,9 +66,10 @@ class UriWrapper : FileObject {
 
     override fun getExtension(): String = MimeTypeMap.getFileExtensionFromUrl(file.uri.toString())
 
-    override suspend fun getParentFile(): FileObject? = file.parentFile?.let { UriWrapper(it) }
+    override suspend fun getParentFile(): FileObject? =
+        withContext(Dispatchers.IO) { file.parentFile?.let { UriWrapper(it) } }
 
-    override suspend fun exists(): Boolean = file.exists()
+    override suspend fun exists(): Boolean = withContext(Dispatchers.IO) { file.exists() }
 
     fun isTermuxUri(): Boolean {
         return getAbsolutePath().startsWith("content://com.termux")
