@@ -117,7 +117,7 @@ class InfiniteLoopDetector(
 
     // ── Read–write cycle: alternating read/write on likely same file ──
 
-    private fun readTools = setOf("readFile", "readFiles", "readAndEdit", "cat", "getFileContent")
+    private val readTools = setOf("readFile", "readFiles", "readAndEdit", "cat", "getFileContent")
 
     private fun detectReadWriteCycle(): LoopInfo? {
         val recent = actionHistory.takeLast(8).map { it.toolName }
