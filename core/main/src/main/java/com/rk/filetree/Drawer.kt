@@ -654,16 +654,21 @@ private fun AddProjectDialog(
             }
 
             if (isManager) {
-                val storageManager = context.getSystemService(StorageManager::class.java)
-                val volumes = storageManager.storageVolumes
+                // Compute the storage-volume list once per dialog open, rather than
+                // on every recomposition, to avoid main-thread filesystem work.
+                val volumes = remember {
+                    runCatching {
+                        val storageManager = context.getSystemService(StorageManager::class.java)
+                        storageManager.storageVolumes.mapNotNull { volume ->
+                            val root = volume.directory ?: return@mapNotNull null
+                            if (root == storage) return@mapNotNull null
+                            if (!root.canRead() || !root.canWrite() || root.listFiles() == null) return@mapNotNull null
+                            Triple(volume.getDescription(context), volume.isRemovable, root)
+                        }
+                    }.getOrDefault(emptyList())
+                }
 
-                volumes.forEach { volume ->
-                    val root = volume.directory ?: return@forEach
-                    if (root == storage) return@forEach
-                    if (!root.canRead() || !root.canWrite() || root.listFiles() == null) return@forEach
-
-                    val name = volume.getDescription(context)
-                    val removable = volume.isRemovable
+                volumes.forEach { (name, removable, root) ->
                     val description = if (removable) strings.open_removable_storage else strings.open_internal_storage
 
                     AddDialogItem(

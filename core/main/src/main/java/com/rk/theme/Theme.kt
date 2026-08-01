@@ -10,7 +10,6 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
@@ -20,7 +19,6 @@ import com.rk.settings.Settings
 import com.rk.settings.editor.rememberAppTypography
 import com.rk.settings.theme.themes
 import com.rk.utils.isDarkTheme
-import com.rk.utils.toast
 
 val currentTheme = mutableStateOf<ThemeHolder?>(null)
 val dynamicTheme = mutableStateOf(Settings.monet)
@@ -76,17 +74,7 @@ fun XedTheme(
                     themeHolder.lightScheme
                 }
 
-            // Is possible?
-            if (currentTheme.value == null) {
-                LaunchedEffect(theme) { toast("No theme selected") }
-                if (darkTheme) {
-                    blueberry.darkScheme
-                } else {
-                    blueberry.lightScheme
-                }
-            } else {
-                theme
-            }
+            theme
         }
 
     CompositionLocalProvider(LocalThemeHolder provides themeHolder) {
