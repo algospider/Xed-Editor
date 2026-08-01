@@ -231,11 +231,6 @@ class GenerationHandler(
 
                 val tools = messages.last().getTools().filter { !it.isExecuted }
                 if (tools.isEmpty()) {
-                    val lastMessage = messages.lastOrNull()
-                    val finishReason = lastMessage?.let { msg ->
-                        msg.parts.firstOrNull()?.let { null }
-                    }
-                    // Check finish reason from the message's choices (handled via handleMessageChunk)
                     // If the model stopped with "length" finish reason, compact and retry
                     val hasLengthFinish = ToolOutputFormatter.checkFinishReason(messages, lastFinishReason)
                     if (hasLengthFinish) {

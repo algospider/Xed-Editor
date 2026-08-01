@@ -2,6 +2,7 @@
 package com.rk.ai.nativeagent.engine
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import androidx.room.Room
 import com.rk.ai.agent.AILoggingManager
@@ -610,11 +611,23 @@ class VibeCodingEngine(
         }
     }
 
+    private var lastTokenEstimateAt = 0L
+    private var lastEstimateMessageCount = -1
+
     fun updateDebugInfo() {
         val s = _state.value
         val msgs = s.messages
-        val tokenEstimate = if (msgs.isNotEmpty()) com.rk.ai.agent.TokenEstimator.estimate(msgs) else null
-        var updated = if (s.contextTokens != tokenEstimate) s.copy(contextTokens = tokenEstimate) else s
+        var updated = s
+        // Throttle the O(n) token estimate: it only feeds a status-bar readout, so
+        // there is no need to recompute it on every streamed chunk. Force a refresh
+        // whenever the message count changes (e.g. conversation cleared/loaded).
+        val now = SystemClock.elapsedRealtime()
+        if (msgs.size != lastEstimateMessageCount || now - lastTokenEstimateAt >= 300L) {
+            lastEstimateMessageCount = msgs.size
+            lastTokenEstimateAt = now
+            val tokenEstimate = if (msgs.isNotEmpty()) com.rk.ai.agent.TokenEstimator.estimate(msgs) else null
+            updated = if (s.contextTokens != tokenEstimate) s.copy(contextTokens = tokenEstimate) else s
+        }
         if (s.debugMode) {
             val lastUser = msgs.lastOrNull { it.role == MessageRole.USER }
             val lastAssistant = msgs.lastOrNull { it.role == MessageRole.ASSISTANT }

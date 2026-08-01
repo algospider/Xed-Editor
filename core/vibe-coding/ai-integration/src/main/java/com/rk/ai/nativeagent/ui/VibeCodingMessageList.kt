@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -76,16 +77,15 @@ fun VibeCodingMessageList(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
-            items(messages, key = { it.id }) { message ->
-                val msgIndex = messages.indexOf(message)
+            itemsIndexed(messages, key = { _, msg -> msg.id }) { index, message ->
                 VibeCodingMessageBubble(
                     message = message,
                     onApproveTool = onApproveTool,
                     onDenyTool = onDenyTool,
                     onAnswerTool = onAnswerTool,
                     onCopy = onCopyMessage,
-                    onDelete = if (msgIndex >= 0 && onDeleteMessage != null) {
-                        { onDeleteMessage(msgIndex) }
+                    onDelete = if (onDeleteMessage != null) {
+                        { onDeleteMessage(index) }
                     } else null,
                     onApplyCode = onApplyCode,
                 )

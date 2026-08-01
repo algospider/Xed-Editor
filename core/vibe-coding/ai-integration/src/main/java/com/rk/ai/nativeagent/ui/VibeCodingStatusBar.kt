@@ -17,12 +17,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rk.ai.agent.executor.AgentPhase
-import com.rk.ai.models.ExecutionState
 import com.rk.ai.nativeagent.engine.VibeCodingEngine
 import com.rk.ai.nativeagent.engine.VibeCodingState
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.withContext
 
 @Composable
 fun VibeCodingStatusBar(
@@ -41,12 +37,9 @@ fun VibeCodingStatusBar(
         label = "statusPulse",
     )
 
-    // Poll active tool name from running executions
+    // Poll active tool name from recent executions
     val activeToolName = remember(state.toolExecutions) {
-        state.toolExecutions.lastOrNull { exec ->
-            exec.executionState is ExecutionState.Running ||
-            exec.toolName != null
-        }?.toolName ?: ""
+        state.toolExecutions.lastOrNull()?.toolName ?: ""
     }
 
     val fileChangeCount = remember(state.toolExecutions) {
@@ -55,6 +48,16 @@ fun VibeCodingStatusBar(
             exec.toolName == "patch" || exec.toolName == "deleteFile"
         }
     }
+
+    // Current model's context window, used by the context-usage meter below.
+    val settingsFlow = engine?.settingsStore?.settingsFlow
+    val modelContextWindow = if (settingsFlow != null) {
+        val settings by settingsFlow.collectAsState()
+        settings.providers.flatMap { it.models }
+            .firstOrNull { it.id == settings.chatModelId }
+            ?.contextWindow
+            ?: 0
+    } else 0
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -138,6 +141,22 @@ fun VibeCodingStatusBar(
                     }
                 }
             }
+        }
+
+        // Context-usage meter: estimated tokens vs the model's context window
+        val contextTokens = state.contextTokens
+        if (contextTokens != null && modelContextWindow > 0) {
+            val fraction = (contextTokens.toFloat() / modelContextWindow).coerceIn(0f, 1f)
+            LinearProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier.fillMaxWidth(),
+                color = when {
+                    fraction >= 0.95f -> colorScheme.error
+                    fraction >= 0.80f -> colorScheme.tertiary
+                    else -> colorScheme.primary
+                },
+                trackColor = colorScheme.surfaceContainerHighest,
+            )
         }
     }
 }
