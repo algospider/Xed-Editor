@@ -13,6 +13,7 @@ data class ReviewReport(
     val feedback: String = "",
     val suggestions: List<String> = emptyList(),
     val missingInfo: List<String> = emptyList(),
+    val issues: List<String> = emptyList(),
     val warnings: List<String> = emptyList(),
     val patterns: List<String> = emptyList(),
     val edgeCases: List<String> = emptyList(),
@@ -63,6 +64,7 @@ class SelfReviewer(
                 feedback = issues.joinToString("\n"),
                 suggestions = suggestions,
                 missingInfo = listOf("Tool execution error"),
+                issues = issues,
             )
         }
 
@@ -134,7 +136,7 @@ class SelfReviewer(
                     }
                     // Edit-input validation
                     if (toolName == "editFile") {
-                        validateEditFileInput(toolInput, issues, suggestions)
+                        validateEditFileInput(toolInput, issues, suggestions, warnings)
                     } else if (toolName == "applyBatchEdits") {
                         if (toolInput.contains("oldString") && (toolInput.contains("\"\"") || toolInput.contains("''"))) {
                             warnings.add("Batch edit contains empty oldStrings — may cause unintended replacements")
@@ -258,6 +260,7 @@ class SelfReviewer(
             feedback = allIssues.joinToString("\n"),
             suggestions = suggestions.distinct(),
             missingInfo = missingInfo,
+            issues = issues,
             warnings = warnings,
             patterns = patterns.distinct(),
             edgeCases = edgeCases.distinct(),
@@ -274,6 +277,7 @@ class SelfReviewer(
         input: String,
         issues: MutableList<String>,
         suggestions: MutableList<String>,
+        warnings: MutableList<String>,
     ) {
         val oldStringMatch = Regex(""""oldString"\s*:\s*"((?:[^"\\]|\\.)*)""").find(input)
         if (oldStringMatch == null) {

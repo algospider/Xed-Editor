@@ -130,7 +130,7 @@ class GenerationHandler(
                 if (compactionCount >= MAX_COMPACTIONS) {
                     Log.w(TAG, "Max compactions reached ($MAX_COMPACTIONS), cannot compact further")
                 } else {
-                    val (compacted, updatedSummary) = compactMessages(messages, model, generationSummary)
+                    val (compacted, updatedSummary) = compactMessages(messages, model, generationSummary, compactionCount)
                     messages = compacted
                     generationSummary = updatedSummary
                     compactionCount++
@@ -241,7 +241,7 @@ class GenerationHandler(
                     if (hasLengthFinish) {
                         Log.w(TAG, "Model stopped with 'length' finish reason, compacting...")
                         if (compactionCount < MAX_COMPACTIONS) {
-                            val (compacted, updatedSummary) = compactMessages(messages, model, generationSummary)
+                            val (compacted, updatedSummary) = compactMessages(messages, model, generationSummary, compactionCount)
                             messages = compacted
                             generationSummary = updatedSummary
                             compactionCount++
@@ -581,6 +581,7 @@ class GenerationHandler(
         messages: List<UIMessage>,
         model: Model,
         currentSummary: String?,
+        compactionCount: Int,
     ): Pair<List<UIMessage>, String?> {
         val hasOverflow = CompactionHandler.needsCompaction(messages, model.contextWindow, model.maxOutputTokens)
         if (!hasOverflow) return messages to currentSummary
