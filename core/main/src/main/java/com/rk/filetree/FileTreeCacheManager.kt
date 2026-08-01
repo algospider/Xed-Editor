@@ -173,13 +173,19 @@ class FileTreeCacheManager(
     private suspend fun sortAndFilterFiles(fileObjects: List<FileObject>): List<FileTreeNode> {
         val fileSizes = calculateFileSizes(fileObjects)
 
+        // Precompute lowercase names once — calling getName().lowercase() inside the
+        // comparator re-allocates a string for every comparison (O(n log n)).
+        val lowerNames = if (sortMode == SortMode.SORT_BY_NAME) {
+            fileObjects.associateWith { it.getName().lowercase() }
+        } else emptyMap()
+
         return fileObjects
             .sortedWith(
                 compareBy<FileObject> { !it.isDirectory() }
                     .thenComparator { f1, f2 ->
                         when (sortMode) {
                             SortMode.SORT_BY_NAME ->
-                                f1.getName().lowercase().compareTo(f2.getName().lowercase())
+                                (lowerNames[f1] ?: "").compareTo(lowerNames[f2] ?: "")
                             SortMode.SORT_BY_SIZE ->
                                 (fileSizes[f2] ?: 0L).compareTo(fileSizes[f1] ?: 0L)
                             SortMode.SORT_BY_DATE ->
