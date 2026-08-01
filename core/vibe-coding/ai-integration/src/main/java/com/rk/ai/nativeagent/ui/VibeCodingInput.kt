@@ -177,15 +177,33 @@ fun VibeCodingInput(
                 }
             }
 
-            // Slash command suggestions
+            // Slash command suggestions — built-ins + project commands from
+            // .xed/commands/ (exposed via the engine's command catalog).
+            val catalogCommands = remember(engine) {
+                engine?.getCommandCatalog()
+                    ?.filter { it.slash.isNotBlank() && !it.hidden }
+                    ?.map { cmd ->
+                        SlashCommand(
+                            id = cmd.slash,
+                            label = cmd.title,
+                            description = cmd.description.ifBlank { "Project command" },
+                            icon = Icons.Outlined.Terminal,
+                            prompt = cmd.prompt,
+                        )
+                    }
+                    ?: emptyList()
+            }
+            val allSlashCommands = remember(slashCommands, catalogCommands) {
+                slashCommands + catalogCommands
+            }
             AnimatedVisibility(
                 visible = showSlashMenu && textFieldValue.text.startsWith("/"),
                 enter = fadeIn(),
                 exit = fadeOut(),
             ) {
                 val query = textFieldValue.text.drop(1).substringBefore(" ").lowercase()
-                val filtered = if (query.isBlank()) slashCommands
-                else slashCommands.filter { it.id.contains(query, ignoreCase = true) || it.label.contains(query, ignoreCase = true) }
+                val filtered = if (query.isBlank()) allSlashCommands
+                else allSlashCommands.filter { it.id.contains(query, ignoreCase = true) || it.label.contains(query, ignoreCase = true) }
 
                 Surface(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).padding(horizontal = 8.dp),
