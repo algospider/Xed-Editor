@@ -20,8 +20,6 @@ class VibeCodingSystemTools(
     private val context: Context,
 ) {
 
-    fun getGuidelinesText(): String = SYSTEM_INSTRUCTIONS
-
     private val getIdeInfo = Tool(
         name = "getIdeInfo",
         description = "Returns IDE info: name, workspace path, open files list. " +
