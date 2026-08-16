@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(touch .git/objects/bc/testwrite)",
+      "Bash(rm -f .git/objects/bc/testwrite)"
+    ]
+  }
+}
