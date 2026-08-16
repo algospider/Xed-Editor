@@ -1,3 +1,4 @@
+@file:OptIn(ExperimentalUuidApi::class)
 package com.rk.ai.nativeagent.ui
 
 import androidx.compose.animation.core.*
@@ -19,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.rk.ai.agent.executor.AgentPhase
 import com.rk.ai.nativeagent.engine.VibeCodingEngine
 import com.rk.ai.nativeagent.engine.VibeCodingState
+import kotlin.uuid.ExperimentalUuidApi
 
 @Composable
 fun VibeCodingStatusBar(
