@@ -38,7 +38,6 @@ import com.rk.icons.XedIcon
 import com.rk.resources.strings
 import com.rk.settings.Settings
 import com.rk.theme.Typography
-import com.rk.utils.x
 import kotlin.math.min
 
 @Composable
