@@ -118,8 +118,11 @@ class SettingsStore(
         .map {
             var providers = it.providers.ifEmpty { DEFAULT_PROVIDERS }.toMutableList()
             DEFAULT_PROVIDERS.forEach { defaultProvider ->
-                if (providers.none { it.id == defaultProvider.id }) {
+                val existingIndex = providers.indexOfFirst { it.id == defaultProvider.id }
+                if (existingIndex == -1) {
                     providers.add(defaultProvider)
+                } else if (providers[existingIndex].models.isEmpty() && defaultProvider.models.isNotEmpty()) {
+                    providers[existingIndex] = providers[existingIndex].copyProvider(models = defaultProvider.models)
                 }
             }
             val assistants = it.assistants.ifEmpty { DEFAULT_ASSISTANTS }.toMutableList()

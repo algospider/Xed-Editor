@@ -22,11 +22,12 @@ private data class QuickAction(
 )
 
 private val quickActions = listOf(
+    QuickAction(Icons.Outlined.Lightbulb, "Explain", "Explain how this project is structured and what it does"),
     QuickAction(Icons.Outlined.BugReport, "Fix Bugs", "Find and fix issues in the current code"),
     QuickAction(Icons.Outlined.Science, "Add Tests", "Write tests for the codebase"),
     QuickAction(Icons.Outlined.Refresh, "Refactor", "Refactor the codebase for better quality"),
     QuickAction(Icons.Outlined.RateReview, "Review", "Review recent changes for issues"),
-    QuickAction(Icons.Outlined.AccountTree, "Plan", "Create a step-by-step plan for a task"),
+    QuickAction(Icons.Outlined.AccountTree, "Plan", "Create a step-by-step plan for a new task"),
 )
 
 @Composable
@@ -151,9 +152,9 @@ internal fun VibeCodingEmptyState(
                         tint = colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     )
                     Text(
-                        text = "Type / for commands, or ask me anything about your codebase",
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        text = "Ask questions, edit files, or type / for commands",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

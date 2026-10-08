@@ -42,7 +42,33 @@ internal val DEFAULT_PROVIDERS = listOf(
         name = "Gemini",
         apiKey = "",
         enabled = true,
-        builtIn = true
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("6ab18148-c138-4394-a46f-1cd8c8ceaa01"),
+                modelId = "gemini-2.0-flash",
+                displayName = "Gemini 2.0 Flash (Recommended)",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+            ),
+            Model(
+                id = Uuid.parse("6ab18148-c138-4394-a46f-1cd8c8ceaa02"),
+                modelId = "gemini-1.5-flash",
+                displayName = "Gemini 1.5 Flash",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.TOOL),
+            ),
+            Model(
+                id = Uuid.parse("6ab18148-c138-4394-a46f-1cd8c8ceaa03"),
+                modelId = "gemini-1.5-pro",
+                displayName = "Gemini 1.5 Pro",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+            ),
+        ),
     ),
     ProviderSetting.OpenAI(
         id = Uuid.parse("1b1395ed-b702-4aeb-8bc1-b681c4456953"),

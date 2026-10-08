@@ -74,6 +74,13 @@ private fun Categories(navController: NavController) {
         onNavigate = { navController.navigate(SettingsRoutes.Keybindings.route) },
     )
 
+    PreferenceCategory(
+        label = stringResource(id = strings.ai),
+        description = stringResource(id = strings.ai_desc),
+        iconResource = drawables.auto_fix,
+        onNavigate = { navController.navigate(SettingsRoutes.AiSettings.route) },
+    )
+
     if (InbuiltFeatures.git.state.value) {
         PreferenceCategory(
             label = stringResource(strings.git),

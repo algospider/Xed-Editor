@@ -121,6 +121,18 @@ fun MainContent(
                 .padding(innerPadding)
         ) {
             if (mainViewModel.tabs.isEmpty()) {
+                var showAiWizard by remember { mutableStateOf(false) }
+                if (showAiWizard) {
+                    com.rk.ai.AiSetupWizardDialog(
+                        onDismissRequest = { showAiWizard = false },
+                        onComplete = { isVibeCoding ->
+                            showAiWizard = false
+                            mainViewModel.bottomPanelMode = if (isVibeCoding) BottomPanelMode.VIBE_CODING else BottomPanelMode.AI
+                            mainViewModel.showBottomPanel = true
+                        }
+                    )
+                }
+
                 EmptyEditorState(
                     onNewFile = {
                         com.rk.activities.main.MainActivity.instance?.apply {
@@ -137,9 +149,14 @@ fun MainContent(
                         mainViewModel.showBottomPanel = true
                     },
                     onOpenAi = {
-                        mainViewModel.bottomPanelMode = BottomPanelMode.AI
-                        mainViewModel.showBottomPanel = true
+                        if (Settings.ai_api_key.isBlank()) {
+                            showAiWizard = true
+                        } else {
+                            mainViewModel.bottomPanelMode = BottomPanelMode.AI
+                            mainViewModel.showBottomPanel = true
+                        }
                     },
+                    onSetupAi = { showAiWizard = true },
                 )
             } else {
                 val pagerState = rememberPagerState(pageCount = { mainViewModel.tabs.size })
@@ -487,6 +504,7 @@ private fun EmptyEditorState(
     onOpenFile: () -> Unit,
     onOpenTerminal: () -> Unit,
     onOpenAi: () -> Unit,
+    onSetupAi: () -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     Box(
@@ -534,7 +552,65 @@ private fun EmptyEditorState(
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(Modifier.height(26.dp))
+            Spacer(Modifier.height(22.dp))
+
+            // Beginner AI Assistant Setup Banner
+            if (Settings.ai_api_key.isBlank()) {
+                Surface(
+                    onClick = onSetupAi,
+                    shape = RoundedCornerShape(16.dp),
+                    color = colorScheme.primaryContainer.copy(alpha = 0.35f),
+                    modifier = Modifier
+                        .widthIn(max = 380.dp)
+                        .fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = colorScheme.primary,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Psychology,
+                                    contentDescription = null,
+                                    tint = colorScheme.onPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Setup AI Assistant",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Get free Gemini API & code with AI in 1 min",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = colorScheme.primary,
+                        ) {
+                            Text(
+                                text = "Setup",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colorScheme.onPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+            }
 
             // 2x2 Action Grid
             Column(
@@ -567,7 +643,7 @@ private fun EmptyEditorState(
                     QuickActionCard(
                         icon = Icons.Outlined.Psychology,
                         title = "AI Agent",
-                        subtitle = "OpenCode / Claude",
+                        subtitle = "VibeCoding / CLI",
                         onClick = onOpenAi,
                         modifier = Modifier.weight(1f),
                     )

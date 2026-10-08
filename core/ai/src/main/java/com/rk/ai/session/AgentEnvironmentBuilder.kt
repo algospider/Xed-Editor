@@ -107,6 +107,14 @@ object AgentEnvironmentBuilder {
         ).apply {
             addAll(config.agent.buildEnv(emptyMap()).map { "${it.key}=${it.value}" })
             addAll(config.extraEnv.map { "${it.key}=${it.value}" })
+            val apiKey = Settings.ai_api_key.trim()
+            if (apiKey.isNotBlank()) {
+                add("GEMINI_API_KEY=$apiKey")
+                add("GOOGLE_API_KEY=$apiKey")
+                add("GOOGLE_GENAI_API_KEY=$apiKey")
+                add("ANTHROPIC_API_KEY=$apiKey")
+                add("OPENAI_API_KEY=$apiKey")
+            }
             val nativeLibDir = File(activity.applicationInfo.nativeLibraryDir)
             if (!isFDroid && nativeLibDir.child("libproot-loader.so").exists()) {
                 add("PROOT_LOADER=${nativeLibDir.child("libproot-loader.so").absolutePath}")
@@ -157,6 +165,14 @@ object AgentEnvironmentBuilder {
         appendLine("export CLAUDE_CODE_IDE_PID=${Process.myPid()}")
         appendLine("export MCP_PORT=${bridge.port}")
         appendLine("export MCP_AUTH_TOKEN=${bridge.token}")
+        val apiKey = Settings.ai_api_key.trim()
+        if (apiKey.isNotBlank()) {
+            appendLine("export GEMINI_API_KEY=\"$apiKey\"")
+            appendLine("export GOOGLE_API_KEY=\"$apiKey\"")
+            appendLine("export GOOGLE_GENAI_API_KEY=\"$apiKey\"")
+            appendLine("export ANTHROPIC_API_KEY=\"$apiKey\"")
+            appendLine("export OPENAI_API_KEY=\"$apiKey\"")
+        }
     }
 
     fun writeBridgeEnvFile(tmpDir: File, xedDir: File?, bridge: IdeBridge.Info) {
@@ -166,35 +182,46 @@ object AgentEnvironmentBuilder {
         runCatching { sandboxHomeDir().let { if (it.exists()) File(it, AiConfig.Discovery.xedBridgeEnvHomeFile).writeText(envContent) } }
     }
 
-    fun buildMinimalBridgeEnv(bridge: IdeBridge.Info, workingDir: String): List<String> = listOf(
-        "WKDIR=$workingDir",
-        "GEMINI_CLI_IDE_SERVER_PORT=${bridge.port}",
-        "GEMINI_CLI_IDE_AUTH_TOKEN=${bridge.token}",
-        "GEMINI_CLI_IDE_PID=${Process.myPid()}",
-        "GEMINI_CLI_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
-        "CODEX_IDE_SERVER_PORT=${bridge.port}",
-        "CODEX_IDE_AUTH_TOKEN=${bridge.token}",
-        "CODEX_IDE_PID=${Process.myPid()}",
-        "CODEX_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
-        "ANTIGRAVITY_IDE_SERVER_PORT=${bridge.port}",
-        "ANTIGRAVITY_IDE_AUTH_TOKEN=${bridge.token}",
-        "ANTIGRAVITY_IDE_PID=${Process.myPid()}",
-        "ANTIGRAVITY_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
-        "CLAUDE_IDE_SERVER_PORT=${bridge.port}",
-        "CLAUDE_IDE_AUTH_TOKEN=${bridge.token}",
-        "CLAUDE_IDE_PID=${Process.myPid()}",
-        "CLAUDE_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
-        "CLAUDE_CODE_IDE_SERVER_PORT=${bridge.port}",
-        "CLAUDE_CODE_IDE_AUTH_TOKEN=${bridge.token}",
-        "CLAUDE_CODE_IDE_PID=${Process.myPid()}",
-        "CLAUDE_CODE_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
-        "IDE_SERVER_PORT=${bridge.port}",
-        "IDE_AUTH_TOKEN=${bridge.token}",
-        "IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
-        "TERM_PROGRAM=vscode",
-        "TERM_PROGRAM_VERSION=1.0.0",
-        "VSCODE_PID=${Process.myPid()}",
-        "EDITOR=vim",
-        "VISUAL=vim",
-    )
+    fun buildMinimalBridgeEnv(bridge: IdeBridge.Info, workingDir: String): List<String> {
+        val list = mutableListOf(
+            "WKDIR=$workingDir",
+            "GEMINI_CLI_IDE_SERVER_PORT=${bridge.port}",
+            "GEMINI_CLI_IDE_AUTH_TOKEN=${bridge.token}",
+            "GEMINI_CLI_IDE_PID=${Process.myPid()}",
+            "GEMINI_CLI_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
+            "CODEX_IDE_SERVER_PORT=${bridge.port}",
+            "CODEX_IDE_AUTH_TOKEN=${bridge.token}",
+            "CODEX_IDE_PID=${Process.myPid()}",
+            "CODEX_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
+            "ANTIGRAVITY_IDE_SERVER_PORT=${bridge.port}",
+            "ANTIGRAVITY_IDE_AUTH_TOKEN=${bridge.token}",
+            "ANTIGRAVITY_IDE_PID=${Process.myPid()}",
+            "ANTIGRAVITY_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
+            "CLAUDE_IDE_SERVER_PORT=${bridge.port}",
+            "CLAUDE_IDE_AUTH_TOKEN=${bridge.token}",
+            "CLAUDE_IDE_PID=${Process.myPid()}",
+            "CLAUDE_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
+            "CLAUDE_CODE_IDE_SERVER_PORT=${bridge.port}",
+            "CLAUDE_CODE_IDE_AUTH_TOKEN=${bridge.token}",
+            "CLAUDE_CODE_IDE_PID=${Process.myPid()}",
+            "CLAUDE_CODE_IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
+            "IDE_SERVER_PORT=${bridge.port}",
+            "IDE_AUTH_TOKEN=${bridge.token}",
+            "IDE_WORKSPACE_PATH=${com.rk.ai.ideWorkspacePath(workingDir)}",
+            "TERM_PROGRAM=vscode",
+            "TERM_PROGRAM_VERSION=1.0.0",
+            "VSCODE_PID=${Process.myPid()}",
+            "EDITOR=vim",
+            "VISUAL=vim",
+        )
+        val apiKey = Settings.ai_api_key.trim()
+        if (apiKey.isNotBlank()) {
+            list.add("GEMINI_API_KEY=$apiKey")
+            list.add("GOOGLE_API_KEY=$apiKey")
+            list.add("GOOGLE_GENAI_API_KEY=$apiKey")
+            list.add("ANTHROPIC_API_KEY=$apiKey")
+            list.add("OPENAI_API_KEY=$apiKey")
+        }
+        return list
+    }
 }

@@ -1,3 +1,4 @@
+@file:OptIn(kotlin.uuid.ExperimentalUuidApi::class)
 package com.rk.ai
 
 import android.app.Activity
@@ -5,10 +6,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -170,6 +173,39 @@ fun UnifiedToolSheet(
         AiProvider.ideBridge?.setWorkspacePath(cwd.value)
     }
 
+    LaunchedEffect(vibecodingEngine, Settings.ai_api_key) {
+        val key = Settings.ai_api_key.trim()
+        val eng = vibecodingEngine
+        if (eng != null && key.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    eng.settingsStore.update { s ->
+                        val updated = s.providers.map { p ->
+                            if (p is com.rk.ai.providers.ProviderSetting.Google && p.apiKey.isBlank()) {
+                                p.copy(apiKey = key, enabled = true)
+                            } else p
+                        }
+                        s.copy(providers = updated)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    var showSetupWizard by remember { mutableStateOf(false) }
+    if (showSetupWizard) {
+        AiSetupWizardDialog(
+            onDismissRequest = { showSetupWizard = false },
+            onComplete = { isVibeCoding ->
+                showSetupWizard = false
+                viewModel.bottomPanelMode = if (isVibeCoding) BottomPanelMode.VIBE_CODING else BottomPanelMode.AI
+                if (!isVibeCoding) {
+                    logic.startAgent(cwd.value, forceRestart = true)
+                }
+            }
+        )
+    }
+
     val act = activity
     DisposableEffect(Unit) {
         val observer = LifecycleEventObserver { _, event ->
@@ -249,6 +285,7 @@ fun UnifiedToolSheet(
                 isAiRunning = isAiRunning,
                 agentName = currentAgent?.displayName ?: "AI",
                 onStart = { logic.startAgent(cwd.value, forceRestart = true) },
+                onSetupKey = { showSetupWizard = true },
                 cwd = cwd.value,
                 transcript = transcript,
                 onClearTranscript = { viewModel.agentTranscript = "" },
@@ -278,6 +315,7 @@ internal fun AiSessionOverview(
     isRunning: Boolean,
     agentName: String,
     onStart: () -> Unit,
+    onSetupKey: () -> Unit = {},
     cwd: String = "",
     transcript: String = "",
     onClearTranscript: () -> Unit = {},
@@ -305,6 +343,51 @@ internal fun AiSessionOverview(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 color = colorScheme.onSurface
             )
+
+            if (Settings.ai_api_key.isBlank()) {
+                Surface(
+                    onClick = onSetupKey,
+                    shape = RoundedCornerShape(12.dp),
+                    color = colorScheme.errorContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Warning,
+                            contentDescription = null,
+                            tint = colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Gemini API Key Required",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "Tap to set up free Gemini API key in 30s to bypass terminal login prompts.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = colorScheme.error,
+                        ) {
+                            Text(
+                                text = "Setup",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colorScheme.onError,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),

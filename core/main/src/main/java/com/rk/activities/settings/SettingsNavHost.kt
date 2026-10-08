@@ -113,5 +113,6 @@ fun SettingsNavHost(navController: NavHostController, activity: SettingsActivity
         }
         composable(SettingsRoutes.Git.route) { GitSettings() }
         composable(SettingsRoutes.ExternalMcp.route) { ExternalMcpSettingsScreen() }
+        composable(SettingsRoutes.AiSettings.route) { com.rk.settings.ai.AiSettingsScreen(navController) }
     }
 }
