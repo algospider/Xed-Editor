@@ -104,13 +104,26 @@ fun ToolSheetContainer(
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
     val imeHeightDp = with(density) { WindowInsets.ime.getBottom(density).toDp() }
     val statusBarHeightDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+    val imeVisible = WindowInsets.isImeVisible
 
     val isTablet = screenWidthDp >= 600.dp
 
-    val availableHeight = (screenHeightDp - imeHeightDp - statusBarHeightDp).coerceAtLeast(360.dp)
-    val maxHeight = (availableHeight * if (isTablet) 0.88f else 0.94f).coerceAtLeast(360.dp)
-    val minHeight = DesignTokens.BottomSheet.minSheetHeight.coerceAtMost(maxHeight)
-    val initialHeight = (availableHeight * if (isTablet) 0.60f else 0.55f).coerceIn(minHeight, maxHeight)
+    val availableHeight = (screenHeightDp - imeHeightDp - statusBarHeightDp).coerceAtLeast(200.dp)
+    val maxHeight = if (imeVisible && !isTablet) {
+        (availableHeight - 8.dp).coerceAtLeast(240.dp)
+    } else {
+        (availableHeight * if (isTablet) 0.88f else 0.90f).coerceAtLeast(280.dp)
+    }
+    val minHeight = if (imeVisible && !isTablet) {
+        maxHeight
+    } else {
+        DesignTokens.BottomSheet.minSheetHeight.coerceAtMost(maxHeight)
+    }
+    val initialHeight = if (imeVisible && !isTablet) {
+        maxHeight
+    } else {
+        (availableHeight * if (isTablet) 0.60f else 0.52f).coerceIn(minHeight, maxHeight)
+    }
 
     val state = rememberToolSheetState(
         minHeight = minHeight,
@@ -118,14 +131,11 @@ fun ToolSheetContainer(
         maxHeight = maxHeight,
     )
 
-    // When the keyboard closes, the sheet stays shrunk at the clamped height
-    // forever (bounds grew but heightPx never restores). Snap back to the
-    // default open height so one keyboard cycle doesn't permanently shrink it.
-    val imeVisible = WindowInsets.isImeVisible
-    val restoreDensity = LocalDensity.current
     LaunchedEffect(imeVisible) {
-        if (!imeVisible) {
-            state.snapTo(initialHeight.value * restoreDensity.density)
+        if (imeVisible && !isTablet) {
+            state.snapTo(maxHeight.value * density.density)
+        } else {
+            state.snapTo(initialHeight.value * density.density)
         }
     }
 
@@ -136,6 +146,7 @@ fun ToolSheetContainer(
         modifier = modifier,
         showTerminal = showTerminal,
         isTablet = isTablet,
+        imeVisible = imeVisible,
         headerContent = headerContent,
         controls = controls,
         bottomBar = bottomBar,
@@ -143,6 +154,7 @@ fun ToolSheetContainer(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ToolSheetModalContainer(
     onDismissRequest: () -> Unit,
@@ -160,13 +172,26 @@ fun ToolSheetModalContainer(
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
     val imeHeightDp = with(density) { WindowInsets.ime.getBottom(density).toDp() }
     val statusBarHeightDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+    val imeVisible = WindowInsets.isImeVisible
 
     val isTablet = screenWidthDp >= 600.dp
 
-    val availableHeight = (screenHeightDp - imeHeightDp - statusBarHeightDp).coerceAtLeast(360.dp)
-    val maxHeight = (availableHeight * if (isTablet) 0.88f else 0.94f).coerceAtLeast(360.dp)
-    val minHeight = DesignTokens.BottomSheet.minSheetHeight.coerceAtMost(maxHeight)
-    val initialHeight = (availableHeight * if (isTablet) 0.60f else 0.55f).coerceIn(minHeight, maxHeight)
+    val availableHeight = (screenHeightDp - imeHeightDp - statusBarHeightDp).coerceAtLeast(200.dp)
+    val maxHeight = if (imeVisible && !isTablet) {
+        (availableHeight - 8.dp).coerceAtLeast(240.dp)
+    } else {
+        (availableHeight * if (isTablet) 0.88f else 0.90f).coerceAtLeast(280.dp)
+    }
+    val minHeight = if (imeVisible && !isTablet) {
+        maxHeight
+    } else {
+        DesignTokens.BottomSheet.minSheetHeight.coerceAtMost(maxHeight)
+    }
+    val initialHeight = if (imeVisible && !isTablet) {
+        maxHeight
+    } else {
+        (availableHeight * if (isTablet) 0.60f else 0.52f).coerceIn(minHeight, maxHeight)
+    }
 
     val state = rememberToolSheetState(
         minHeight = minHeight,
@@ -191,6 +216,7 @@ fun ToolSheetModalContainer(
             modifier = modifier,
             showTerminal = showTerminal,
             isTablet = isTablet,
+            imeVisible = imeVisible,
             headerContent = headerContent,
             controls = controls,
             bottomBar = bottomBar,
@@ -207,6 +233,7 @@ private fun ToolSheetContent(
     modifier: Modifier = Modifier,
     showTerminal: Boolean = true,
     isTablet: Boolean = false,
+    imeVisible: Boolean = false,
     headerContent: (@Composable () -> Unit)? = null,
     controls: (@Composable RowScope.() -> Unit)? = null,
     bottomBar: (@Composable () -> Unit)? = null,
@@ -222,6 +249,11 @@ private fun ToolSheetContent(
         modifier = modifier
             .fillMaxWidth()
             .height(state.heightDp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+            )
             .shadow(
                 elevation = DesignTokens.BottomSheet.elevation,
                 shape = shape,
@@ -235,15 +267,14 @@ private fun ToolSheetContent(
             ),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.navigationBars)
+            modifier = Modifier.fillMaxSize(),
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .draggable(
                         orientation = Orientation.Vertical,
+                        enabled = !imeVisible,
                         state = rememberDraggableState { delta ->
                             state.snapTo(state.heightPx - delta)
                         },
@@ -261,19 +292,23 @@ private fun ToolSheetContent(
                     )
                     .background(colorScheme.surfaceContainer)
             ) {
-                XedDragHandle(
-                    isDragging = isDragging,
-                    modifier = Modifier.clickable {
-                        val midPx = (state.minHeightPx + state.maxHeightPx) / 2f
-                        state.snapTo(if (state.heightPx < midPx) state.maxHeightPx else state.minHeightPx)
-                    },
-                )
+                if (!imeVisible) {
+                    XedDragHandle(
+                        isDragging = isDragging,
+                        modifier = Modifier.clickable {
+                            val midPx = (state.minHeightPx + state.maxHeightPx) / 2f
+                            state.snapTo(if (state.heightPx < midPx) state.maxHeightPx else state.minHeightPx)
+                        },
+                    )
+                } else {
+                    Spacer(Modifier.height(4.dp))
+                }
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(40.dp)
-                        .padding(start = 12.dp, end = 4.dp),
+                        .height(if (imeVisible) 34.dp else 40.dp)
+                        .padding(start = 8.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
@@ -338,7 +373,10 @@ private fun ToolSheetContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(colorScheme.surfaceContainer)
-                        .navigationBarsPadding(),
+                        .then(
+                            if (!imeVisible) Modifier.navigationBarsPadding()
+                            else Modifier
+                        ),
                 ) {
                     it()
                 }

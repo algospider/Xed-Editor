@@ -116,6 +116,8 @@ fun MainActivity.MainContentHost(
             BackHandler {
                 if (drawerState.isOpen) {
                     scope.launch { drawerState.close() }
+                } else if (viewModel.showBottomPanel) {
+                    viewModel.showBottomPanel = false
                 } else if (viewModel.tabs.isNotEmpty() && Settings.confirm_exit) {
                     dialog(
                         title = strings.attention.getString(),

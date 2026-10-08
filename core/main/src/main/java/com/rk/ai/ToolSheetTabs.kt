@@ -46,6 +46,7 @@ fun ToolSheetTabBar(
     Row(
         modifier = modifier
             .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         toolSheetTabs.forEach { tab ->
@@ -56,10 +57,10 @@ fun ToolSheetTabBar(
                 shape = RoundedCornerShape(6.dp),
                 color = if (isSelected) colorScheme.surfaceContainerHighest else colorScheme.surfaceContainer,
                 tonalElevation = 0.dp,
-                modifier = Modifier.height(30.dp),
+                modifier = Modifier.height(28.dp),
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp),
+                    modifier = Modifier.padding(horizontal = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {

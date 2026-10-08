@@ -46,17 +46,7 @@ fun AiPanel(
     onToggleTranscript: () -> Unit = {},
 ) {
     if (aiSession != null && isAiRunning) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            AiSessionInfoBar(
-                agentName = agentName,
-                isRunning = isAiRunning,
-            )
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f),
-                thickness = 0.5.dp,
-            )
-            SheetTerminal(session = aiSession, modifier = Modifier.weight(1f).fillMaxWidth(), showKeys = false)
-        }
+        SheetTerminal(session = aiSession, modifier = Modifier.fillMaxSize(), showKeys = false)
     } else {
         AiSessionOverview(
             isRunning = isAiRunning,

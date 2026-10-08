@@ -103,6 +103,12 @@ fun EditorTab.CodeEditor(
 
                     editorState.editor = WeakReference(this)
 
+                    setOnFocusChangeListener { _, hasFocus ->
+                        if (hasFocus && viewModel.showBottomPanel) {
+                            viewModel.showBottomPanel = false
+                        }
+                    }
+
                     registerXedActions(scope, viewModel, this@CodeEditor)
                     registerXedEvents(this@CodeEditor, intelligentFeatures, file, onTextChange, onGhostTextTrigger)
 

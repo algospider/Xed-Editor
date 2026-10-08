@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,6 +39,7 @@ import com.termux.terminal.TerminalSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun UnifiedCommandBar(
     mode: BottomPanelMode,
@@ -57,6 +59,10 @@ fun UnifiedCommandBar(
     var showAgentMenu by remember { mutableStateOf(false) }
     val colorScheme = MaterialTheme.colorScheme
     val availableAgents = AiProvider.sessionManager?.availableAgents() ?: emptyList()
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
+    val isTablet = screenWidthDp >= 600.dp
+    val imeVisible = WindowInsets.isImeVisible
+    val isCompactMobile = imeVisible && !isTablet
 
     val terminalSession = if (mode == BottomPanelMode.TERMINAL) {
         val service = terminalViewModel.sessionBinder?.getService()
@@ -89,6 +95,8 @@ fun UnifiedCommandBar(
             onClearTranscript = onClearTranscript,
             terminalViewModel = terminalViewModel,
             onBridgeDetails = { onAction("/doctor") },
+            onStop = { onAction("/stop") },
+            isCompact = isCompactMobile,
         )
 
         if (mode == BottomPanelMode.TERMINAL) {
@@ -99,7 +107,7 @@ fun UnifiedCommandBar(
         if (mode == BottomPanelMode.AI) {
             DividerThin(colorScheme)
             AndroidView<VirtualKeysView>(
-                modifier = Modifier.fillMaxWidth().height(44.dp),
+                modifier = Modifier.fillMaxWidth().height(if (isCompactMobile) 38.dp else 44.dp),
                 factory = { ctx ->
                     VirtualKeysView(ctx, null).apply {
                         setButtonTextColor(colorScheme.onSurface.toArgb())
@@ -128,7 +136,7 @@ fun UnifiedCommandBar(
             )
         }
 
-        if (mode == BottomPanelMode.AI) {
+        if (mode == BottomPanelMode.AI && !isCompactMobile) {
             DividerThin(colorScheme)
             QuickActions(
                 isRunning = isAiRunning,
@@ -142,6 +150,7 @@ fun UnifiedCommandBar(
             TerminalQuickActions(
                 terminalViewModel = terminalViewModel,
                 onAction = onAction,
+                isCompact = isCompactMobile,
             )
         }
     }
@@ -273,20 +282,22 @@ private fun DividerThin(colorScheme: ColorScheme) {
 private fun TerminalQuickActions(
     terminalViewModel: TerminalViewModel,
     onAction: (String) -> Unit,
+    isCompact: Boolean = false,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
+    val chipHeight = if (isCompact) 26.dp else 32.dp
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 6.dp, vertical = 4.dp),
+            .padding(horizontal = 6.dp, vertical = if (isCompact) 2.dp else 4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ActionChip(
-            icon = { Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(15.dp)) },
+            icon = { Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp)) },
             label = "Paste",
             onClick = {
                 terminalViewModel.terminalView?.mTermSession?.let { session ->
@@ -298,20 +309,22 @@ private fun TerminalQuickActions(
             },
             color = colorScheme.secondaryContainer,
             labelColor = colorScheme.onSecondaryContainer,
+            modifier = Modifier.height(chipHeight),
         )
 
         ActionChip(
-            icon = { Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(15.dp)) },
+            icon = { Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(14.dp)) },
             label = "Clear",
             onClick = {
                 terminalViewModel.terminalView?.mTermSession?.write("clear\n")
             },
             color = colorScheme.secondaryContainer,
             labelColor = colorScheme.onSecondaryContainer,
+            modifier = Modifier.height(chipHeight),
         )
 
         ActionChip(
-            icon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp)) },
+            icon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp)) },
             label = "New",
             onClick = {
                 terminalViewModel.terminalView?.let { tv ->
@@ -336,10 +349,11 @@ private fun TerminalQuickActions(
                 }
             },
             color = colorScheme.surfaceContainerHigh,
+            modifier = Modifier.height(chipHeight),
         )
 
         ActionChip(
-            icon = { Icon(Icons.Outlined.Stop, contentDescription = null, modifier = Modifier.size(15.dp)) },
+            icon = { Icon(Icons.Outlined.Stop, contentDescription = null, modifier = Modifier.size(14.dp)) },
             label = "Kill",
             onClick = {
                 terminalViewModel.terminalView?.mTermSession?.let { session ->
@@ -362,6 +376,7 @@ private fun TerminalQuickActions(
             },
             color = colorScheme.errorContainer,
             labelColor = colorScheme.onErrorContainer,
+            modifier = Modifier.height(chipHeight),
         )
     }
 }
@@ -382,6 +397,8 @@ private fun StatusBar(
     onClearTranscript: () -> Unit = {},
     terminalViewModel: TerminalViewModel? = null,
     onBridgeDetails: () -> Unit = {},
+    onStop: () -> Unit = {},
+    isCompact: Boolean = false,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val statusColor = if (isRunning) Color(0xFF4CAF50) else Color(0xFFEF5350)
@@ -389,9 +406,9 @@ private fun StatusBar(
     val bridgeTools = AiProvider.ideBridge?.availableTools() ?: 0
     val bridgeOnline = AiProvider.ideBridge?.isRunning() == true
 
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = if (isCompact) 2.dp else 4.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(34.dp),
+            modifier = Modifier.fillMaxWidth().height(if (isCompact) 28.dp else 34.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box {
@@ -403,7 +420,7 @@ private fun StatusBar(
                         colorScheme.primaryContainer.copy(alpha = 0.5f)
                     else
                         colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                    modifier = Modifier.height(26.dp),
+                    modifier = Modifier.height(if (isCompact) 22.dp else 26.dp),
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 8.dp),
@@ -466,6 +483,25 @@ private fun StatusBar(
                                 onClick = { onSelectAgent(a) },
                             )
                         }
+                    }
+                }
+            }
+
+            if (mode == BottomPanelMode.AI && isRunning) {
+                Spacer(Modifier.width(4.dp))
+                Surface(
+                    onClick = onStop,
+                    shape = RoundedCornerShape(6.dp),
+                    color = colorScheme.errorContainer,
+                    modifier = Modifier.height(if (isCompact) 22.dp else 26.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Stop, contentDescription = "Stop", modifier = Modifier.size(11.dp), tint = colorScheme.error)
+                        Spacer(Modifier.width(3.dp))
+                        Text("Stop", style = MaterialTheme.typography.labelSmall, color = colorScheme.error)
                     }
                 }
             }
