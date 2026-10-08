@@ -48,8 +48,8 @@ fun EditorToolbarActions(modifier: Modifier = Modifier) {
     val allActions = Settings.action_items.split("|").mapNotNull { CommandProvider.getForId(it) }
 
     BoxWithConstraints(modifier = modifier) {
-        val itemWidth = 64.dp
-        val availableWidth = maxWidth - 48.dp
+        val itemWidth = 42.dp
+        val availableWidth = maxWidth - 40.dp
         val maxVisibleCount = (availableWidth / itemWidth).toInt().coerceAtLeast(0)
 
         // Filter visible actions first
@@ -73,7 +73,7 @@ fun EditorToolbarActions(modifier: Modifier = Modifier) {
                         val act = activity ?: return@IconButton
                         command.performCommand(ActionContext(act))
                     },
-                    modifier = Modifier.size(48.dp),
+                    modifier = Modifier.size(40.dp),
                     enabled = command.isEnabled(),
                     colors =
                         IconButtonDefaults.iconButtonColors().let {
@@ -87,6 +87,7 @@ fun EditorToolbarActions(modifier: Modifier = Modifier) {
                 ) {
                     XedIcon(
                         icon = if (command.preferText) Icon.TextIcon(command.getLabel()) else command.getIcon(),
+                        modifier = Modifier.size(20.dp),
                         contentDescription = command.getLabel(),
                     )
                 }
@@ -94,8 +95,8 @@ fun EditorToolbarActions(modifier: Modifier = Modifier) {
 
             if (dropdownActions.isNotEmpty()) {
                 Box(modifier = Modifier.wrapContentSize(Alignment.TopEnd)) {
-                    IconButton(onClick = { expanded = true }, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Outlined.MoreVert, stringResource(strings.more))
+                    IconButton(onClick = { expanded = true }, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Outlined.MoreVert, stringResource(strings.more), modifier = Modifier.size(20.dp))
                     }
 
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

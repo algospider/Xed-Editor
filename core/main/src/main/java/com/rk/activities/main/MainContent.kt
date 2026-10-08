@@ -21,11 +21,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DrawerState
@@ -124,6 +132,14 @@ fun MainContent(
                         }
                     },
                     onOpenFile = { scope.launch { drawerState.open() } },
+                    onOpenTerminal = {
+                        mainViewModel.bottomPanelMode = BottomPanelMode.TERMINAL
+                        mainViewModel.showBottomPanel = true
+                    },
+                    onOpenAi = {
+                        mainViewModel.bottomPanelMode = BottomPanelMode.AI
+                        mainViewModel.showBottomPanel = true
+                    },
                 )
             } else {
                 val pagerState = rememberPagerState(pageCount = { mainViewModel.tabs.size })
@@ -244,10 +260,13 @@ private fun CompactTabItem(
     val activeColor = gitColor ?: MaterialTheme.colorScheme.primary
     val inactiveColor = gitColor ?: MaterialTheme.colorScheme.onSurfaceVariant
 
+    val shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
+
     Box(
         modifier = Modifier
-            .width(DesignTokens.TabSize.minTabWidth.coerceAtMost(DesignTokens.TabSize.maxTabWidth))
+            .widthIn(min = 110.dp, max = 220.dp)
             .fillMaxHeight()
+            .clip(shape)
             .background(bgColor)
             .clickable {
                 if (isSelected) showTabMenu = true
@@ -258,7 +277,7 @@ private fun CompactTabItem(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 8.dp, end = 4.dp),
+                .padding(start = 10.dp, end = 4.dp),
         ) {
             if (Settings.show_tab_icons && tabState.file != null) {
                 FileIcon(
@@ -268,27 +287,36 @@ private fun CompactTabItem(
                 Spacer(Modifier.width(6.dp))
             }
 
+            if (tabState is EditorTab && tabState.editorState.isDirty) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.tertiary),
+                )
+                Spacer(Modifier.width(5.dp))
+            }
+
             Text(
-                text = buildString {
-                    if (tabState is EditorTab && tabState.editorState.isDirty) append("*")
-                    append(tabState.tabTitle.value)
-                },
+                text = tabState.tabTitle.value,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                ),
                 color = if (isSelected) activeColor else inactiveColor,
                 modifier = Modifier.weight(1f),
             )
 
             IconButton(
                 onClick = { onCloseTab(mainViewModel, tabState) },
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(26.dp),
             ) {
                 Icon(
                     painter = painterResource(drawables.close),
                     contentDescription = stringResource(strings.close_this),
-                    modifier = Modifier.size(14.dp),
-                    tint = if (isSelected) activeColor.copy(alpha = 0.6f) else inactiveColor.copy(alpha = 0.3f),
+                    modifier = Modifier.size(13.dp),
+                    tint = if (isSelected) activeColor.copy(alpha = 0.7f) else inactiveColor.copy(alpha = 0.4f),
                 )
             }
         }
@@ -457,111 +485,161 @@ private fun closeAll(mainViewModel: MainViewModel) {
 private fun EmptyEditorState(
     onNewFile: () -> Unit,
     onOpenFile: () -> Unit,
+    onOpenTerminal: () -> Unit,
+    onOpenAi: () -> Unit,
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     Box(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.surface),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(32.dp),
+            modifier = Modifier
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+                .fillMaxWidth(),
         ) {
-            Icon(
-                painter = painterResource(drawables.edit_note),
-                contentDescription = null,
-                modifier = Modifier.size(72.dp),
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-            )
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = colorScheme.primaryContainer.copy(alpha = 0.45f),
+                modifier = Modifier.size(68.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        painter = painterResource(drawables.edit_note),
+                        contentDescription = null,
+                        modifier = Modifier.size(36.dp),
+                        tint = colorScheme.primary,
+                    )
+                }
+            }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
 
             Text(
                 text = stringResource(strings.app_name),
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                color = colorScheme.onSurface,
             )
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
 
             Text(
                 text = stringResource(strings.app_tagline),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(26.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Card(
-                    modifier = Modifier
-                        .size(width = 140.dp, height = 100.dp)
-                        .clickable(onClick = onNewFile),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
+            // 2x2 Action Grid
+            Column(
+                modifier = Modifier.widthIn(max = 380.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        Icon(
-                            painter = painterResource(drawables.add),
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = stringResource(strings.new_file),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
+                    QuickActionCard(
+                        icon = Icons.Outlined.Add,
+                        title = stringResource(strings.new_file),
+                        subtitle = "Create empty file",
+                        onClick = onNewFile,
+                        modifier = Modifier.weight(1f),
+                    )
+                    QuickActionCard(
+                        icon = Icons.Outlined.FolderOpen,
+                        title = stringResource(strings.open_file),
+                        subtitle = "Browse workspace",
+                        onClick = onOpenFile,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-
-                Card(
-                    modifier = Modifier
-                        .size(width = 140.dp, height = 100.dp)
-                        .clickable(onClick = onOpenFile),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        Icon(
-                            painter = painterResource(drawables.folder),
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = stringResource(strings.open_file),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
+                    QuickActionCard(
+                        icon = Icons.Outlined.Psychology,
+                        title = "AI Agent",
+                        subtitle = "OpenCode / Claude",
+                        onClick = onOpenAi,
+                        modifier = Modifier.weight(1f),
+                    )
+                    QuickActionCard(
+                        icon = Icons.Outlined.Terminal,
+                        title = "Terminal",
+                        subtitle = "Linux shell",
+                        onClick = onOpenTerminal,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
+        }
+    }
+}
 
-            Spacer(Modifier.height(32.dp))
-
-            Text(
-                text = stringResource(strings.click_open),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                textAlign = TextAlign.Center,
-            )
+@Composable
+private fun QuickActionCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Card(
+        modifier = modifier
+            .height(82.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = colorScheme.surfaceContainerHigh,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = colorScheme.primaryContainer.copy(alpha = 0.5f),
+                modifier = Modifier.size(38.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = colorScheme.primary,
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

@@ -67,7 +67,7 @@ fun UnifiedToolSheet(
     }
 
     fun terminalHomeDir(): String =
-        if (Settings.sandbox) "/home" else sandboxHomeDir().absolutePath
+        sandboxHomeDir().absolutePath
 
     fun currentProjectDir(): String {
         val activeTab = viewModel.currentTab as? EditorTab
@@ -223,7 +223,7 @@ fun UnifiedToolSheet(
                 terminalViewModel = terminalViewModel,
             )
         },
-        bottomBar = if (viewModel.bottomPanelMode == BottomPanelMode.VIBE_CODING) null else {
+        bottomBar = if (viewModel.bottomPanelMode == BottomPanelMode.VIBE_CODING || viewModel.bottomPanelMode == BottomPanelMode.GIT) null else {
             {
                 UnifiedCommandBar(
                     mode = viewModel.bottomPanelMode,

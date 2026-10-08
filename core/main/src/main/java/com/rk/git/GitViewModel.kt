@@ -106,6 +106,22 @@ class GitViewModel : ViewModel() {
         }
     }
 
+    fun initRepository(root: File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Git.init().setDirectory(root).call().close()
+                withContext(Dispatchers.Main) {
+                    loadRepository(root.absolutePath)
+                    toast("Repository initialized")
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    toast(e.message)
+                }
+            }
+        }
+    }
+
     fun getBranchList(): List<String> {
         return try {
             Git.open(currentRoot.value).use { git ->

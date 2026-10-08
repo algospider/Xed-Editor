@@ -65,10 +65,10 @@ fun VibeCodingStatusBar(
         modifier = modifier.fillMaxWidth(),
         color = colorScheme.surfaceContainerHigh,
         tonalElevation = 1.dp,
-        shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp),
+        shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {

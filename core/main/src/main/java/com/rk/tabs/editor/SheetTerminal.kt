@@ -72,9 +72,25 @@ class SheetTerminalClient(
     }
     override fun logStackTrace(tag: String?, e: Exception?) { e?.printStackTrace() }
     override fun onScale(scale: Float): Float {
-        val fontScale = scale.coerceIn(11f, 45f)
-        view?.setTextSize(fontScale.toInt())
-        return fontScale
+        val v = view ?: return 1.0f
+        if (scale > 1.08f) {
+            val current = Settings.terminal_font_size
+            if (current < 32) {
+                val newSize = current + 1
+                Settings.terminal_font_size = newSize
+                v.applyTerminalSettings(v.context)
+            }
+            return 1.0f
+        } else if (scale < 0.92f) {
+            val current = Settings.terminal_font_size
+            if (current > 7) {
+                val newSize = current - 1
+                Settings.terminal_font_size = newSize
+                v.applyTerminalSettings(v.context)
+            }
+            return 1.0f
+        }
+        return scale
     }
     override fun onSingleTapUp(e: MotionEvent) {
         val v = view ?: return
@@ -82,8 +98,13 @@ class SheetTerminalClient(
             v.isFocusable = true
             v.isFocusableInTouchMode = true
             v.requestFocus()
+            try {
+                androidx.core.view.ViewCompat.getWindowInsetsController(v)
+                    ?.show(androidx.core.view.WindowInsetsCompat.Type.ime())
+            } catch (_: Exception) {}
             val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            imm?.restartInput(v); imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+            imm?.restartInput(v)
+            imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
         }
     }
     override fun shouldBackButtonBeMappedToEscape(): Boolean = false
@@ -193,7 +214,7 @@ fun SheetTerminal(
 
         if (showKeys) {
             AndroidView<VirtualKeysView>(
-                modifier = Modifier.fillMaxWidth().height(36.dp),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
                 factory = { context ->
                     VirtualKeysView(context, null).apply {
                         setButtonTextColor(colorScheme.onSurface.toArgb())

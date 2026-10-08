@@ -1,10 +1,12 @@
 package com.rk.tabs.editor
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -12,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -84,19 +87,32 @@ fun ExtraKeys(editorTab: EditorTab) {
 
     val extraKeys = commandExtraKeys + symbolExtraKeys
 
-    Column(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (Settings.split_extra_keys) {
-            KeyRow(commandExtraKeys)
-            KeyRow(symbolExtraKeys)
-        } else {
-            KeyRow(extraKeys)
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (Settings.split_extra_keys) {
+                KeyRow(commandExtraKeys)
+                KeyRow(symbolExtraKeys)
+            } else {
+                KeyRow(extraKeys)
+            }
         }
     }
 }
 
 @Composable
 private fun KeyRow(extraKeys: List<ExtraKey>) {
-    LazyRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
         items(extraKeys, key = { it.label }) { KeyButton(it) }
     }
 }
@@ -107,39 +123,41 @@ private fun KeyButton(key: ExtraKey) {
 
     val keyContentColor =
         when {
-            key.isOn && key.enabled -> MaterialTheme.colorScheme.primary
-            key.isOn -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            key.isOn && key.enabled -> MaterialTheme.colorScheme.onPrimaryContainer
+            key.isOn -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
             key.enabled -> MaterialTheme.colorScheme.onSurface
-            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
         }
 
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier =
-            Modifier.size(32.dp, 32.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .then(
-                    if (Settings.extra_keys_bg) {
-                        Modifier.background(
-                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (key.enabled) 1f else 0.5f)
-                        )
-                    } else {
-                        Modifier
-                    }
-                )
-                .clickable(
-                    enabled = key.enabled,
-                    onClick = {
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        key.onClick()
-                    },
-                ),
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = if (key.isOn && key.enabled) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (key.enabled) 0.85f else 0.4f)
+        },
+        border = BorderStroke(
+            0.5.dp,
+            if (key.isOn && key.enabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+        ),
+        modifier = Modifier
+            .size(34.dp, 32.dp)
+            .clickable(
+                enabled = key.enabled,
+                onClick = {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    key.onClick()
+                },
+            ),
     ) {
-        XedIcon(
-            icon = key.icon,
-            modifier = Modifier.size(16.dp),
-            contentDescription = key.label,
-            tint = keyContentColor,
-        )
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            XedIcon(
+                icon = key.icon,
+                modifier = Modifier.size(16.dp),
+                contentDescription = key.label,
+                tint = keyContentColor,
+            )
+        }
     }
 }

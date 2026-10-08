@@ -131,7 +131,7 @@ fun TerminalPanelContent(
     ) {
         com.rk.terminal.TerminalPanel(
             terminalViewModel = terminalViewModel,
-            showKeys = true,
+            showKeys = false,
             initialCwd = initialCwd,
         )
         LaunchedEffect(initialCwd) {

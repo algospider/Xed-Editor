@@ -91,9 +91,25 @@ class TerminalBackEnd(terminalViewModel: TerminalViewModel? = null) : TerminalVi
     }
 
     override fun onScale(scale: Float): Float {
-        val fontScale = scale.coerceIn(11f, 45f)
-        terminalViewModel?.terminalView?.setTextSize(fontScale.toInt())
-        return fontScale
+        val v = terminalViewModel?.terminalView ?: return 1.0f
+        if (scale > 1.08f) {
+            val current = Settings.terminal_font_size
+            if (current < 32) {
+                val newSize = current + 1
+                Settings.terminal_font_size = newSize
+                v.applyTerminalSettings(v.context)
+            }
+            return 1.0f
+        } else if (scale < 0.92f) {
+            val current = Settings.terminal_font_size
+            if (current > 7) {
+                val newSize = current - 1
+                Settings.terminal_font_size = newSize
+                v.applyTerminalSettings(v.context)
+            }
+            return 1.0f
+        }
+        return scale
     }
 
     override fun onSingleTapUp(e: MotionEvent) {
@@ -206,6 +222,10 @@ class TerminalBackEnd(terminalViewModel: TerminalViewModel? = null) : TerminalVi
             view.isFocusable = true
             view.isFocusableInTouchMode = true
             view.requestFocus()
+            try {
+                androidx.core.view.ViewCompat.getWindowInsetsController(view)
+                    ?.show(androidx.core.view.WindowInsetsCompat.Type.ime())
+            } catch (_: Exception) {}
             val inputMethodManager =
                 view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
             inputMethodManager?.restartInput(view)

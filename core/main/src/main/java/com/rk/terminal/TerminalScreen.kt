@@ -158,7 +158,7 @@ fun TerminalPanel(
                             )
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().height(36.dp),
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
                     update = { view ->
                         view.virtualKeysViewClient =
                             terminalViewModel.terminalView?.mTermSession?.let { VirtualKeysListener(it) }
@@ -372,7 +372,12 @@ suspend fun changeTerminalSession(sessionId: String, terminalViewModel: Terminal
 }
 
 fun TerminalView.applyTerminalSettings(context: Context) {
-    setTextSize(dpToPx(Settings.terminal_font_size.toFloat(), context))
+    val isTablet = context.resources.configuration.screenWidthDp >= 600
+    val rawSize = Settings.terminal_font_size.toFloat()
+    // On phones (width < 600dp), raw 13sp yields only ~48 columns which breaks modern CLI box layouts
+    // Automatically scale base font size to ~9.5-10sp on phones for standard 72-80 columns
+    val targetSize = if (isTablet) rawSize else if (rawSize >= 13f) 9.5f else rawSize
+    setTextSize(dpToPx(targetSize, context))
     val fontFile = sandboxDir().child("etc/font.ttf")
     if (fontFile.exists()) {
         setTypeface(Typeface.createFromFile(fontFile))

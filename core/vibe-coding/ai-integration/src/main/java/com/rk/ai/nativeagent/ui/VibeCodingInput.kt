@@ -140,8 +140,8 @@ fun VibeCodingInput(
                                 showQuickActions = false
                             },
                             label = { Text(action.label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
-                            icon = { Icon(action.icon, null, modifier = Modifier.size(12.dp)) },
-                            modifier = Modifier.height(24.dp),
+                            icon = { Icon(action.icon, null, modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.height(28.dp),
                         )
                     }
                 }

@@ -22,10 +22,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.rk.resources.drawables
 import androidx.compose.ui.viewinterop.AndroidView
 import com.rk.activities.main.BottomPanelMode
 import com.rk.settings.Settings
@@ -57,6 +59,7 @@ fun UnifiedCommandBar(
     currentFile: String,
 ) {
     var showAgentMenu by remember { mutableStateOf(false) }
+    var showVirtualKeys by remember { mutableStateOf(true) }
     val colorScheme = MaterialTheme.colorScheme
     val availableAgents = AiProvider.sessionManager?.availableAgents() ?: emptyList()
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
@@ -97,17 +100,34 @@ fun UnifiedCommandBar(
             onBridgeDetails = { onAction("/doctor") },
             onStop = { onAction("/stop") },
             isCompact = isCompactMobile,
+            showVirtualKeys = showVirtualKeys,
+            onToggleVirtualKeys = { showVirtualKeys = !showVirtualKeys },
         )
 
         if (mode == BottomPanelMode.TERMINAL) {
             DividerThin(colorScheme)
             SessionChips(terminalViewModel = terminalViewModel)
+            DividerThin(colorScheme)
+            TerminalQuickActions(
+                terminalViewModel = terminalViewModel,
+                onAction = onAction,
+                isCompact = isCompactMobile,
+            )
+        } else if (mode == BottomPanelMode.AI && !isCompactMobile) {
+            DividerThin(colorScheme)
+            QuickActions(
+                isRunning = isAiRunning,
+                currentFile = currentFile,
+                hasSelection = hasSelection,
+                selectedText = selectedText,
+                onAction = onAction,
+            )
         }
 
-        if (mode == BottomPanelMode.AI) {
+        if ((mode == BottomPanelMode.AI || mode == BottomPanelMode.TERMINAL) && showVirtualKeys) {
             DividerThin(colorScheme)
             AndroidView<VirtualKeysView>(
-                modifier = Modifier.fillMaxWidth().height(if (isCompactMobile) 38.dp else 44.dp),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
                 factory = { ctx ->
                     VirtualKeysView(ctx, null).apply {
                         setButtonTextColor(colorScheme.onSurface.toArgb())
@@ -133,24 +153,6 @@ fun UnifiedCommandBar(
                     keys.setButtonTextColor(colorScheme.onSurface.toArgb())
                     keys.setBackgroundColor(colorScheme.surfaceContainer.toArgb())
                 },
-            )
-        }
-
-        if (mode == BottomPanelMode.AI && !isCompactMobile) {
-            DividerThin(colorScheme)
-            QuickActions(
-                isRunning = isAiRunning,
-                currentFile = currentFile,
-                hasSelection = hasSelection,
-                selectedText = selectedText,
-                onAction = onAction,
-            )
-        } else if (mode == BottomPanelMode.TERMINAL) {
-            DividerThin(colorScheme)
-            TerminalQuickActions(
-                terminalViewModel = terminalViewModel,
-                onAction = onAction,
-                isCompact = isCompactMobile,
             )
         }
     }
@@ -399,6 +401,8 @@ private fun StatusBar(
     onBridgeDetails: () -> Unit = {},
     onStop: () -> Unit = {},
     isCompact: Boolean = false,
+    showVirtualKeys: Boolean = true,
+    onToggleVirtualKeys: () -> Unit = {},
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val statusColor = if (isRunning) Color(0xFF4CAF50) else Color(0xFFEF5350)
@@ -566,7 +570,20 @@ private fun StatusBar(
 
             Spacer(Modifier.weight(1f))
 
+            FilledTonalIconButton(
+                onClick = onToggleVirtualKeys,
+                modifier = Modifier.size(if (isCompact) 22.dp else 26.dp),
+            ) {
+                Icon(
+                    painter = painterResource(drawables.keyboard),
+                    contentDescription = if (showVirtualKeys) "Hide virtual keys" else "Show virtual keys",
+                    modifier = Modifier.size(13.dp),
+                    tint = if (showVirtualKeys) colorScheme.primary else colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+            }
+
             if (mode == BottomPanelMode.AI && transcript.isNotBlank()) {
+                Spacer(Modifier.width(2.dp))
                 FilledTonalIconButton(onClick = onToggleTranscript, modifier = Modifier.size(26.dp)) {
                     Icon(
                         if (showTranscript) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
@@ -652,25 +669,25 @@ private fun QuickActions(
                 )
             }
         } else {
-            Button(
-                onClick = { onAction("/stop") },
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+            FilledTonalButton(
+                onClick = { onAction("/restart") },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                 modifier = Modifier.height(32.dp),
                 shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = colorScheme.errorContainer,
-                    contentColor = colorScheme.error,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    contentColor = colorScheme.onSurfaceVariant,
                 ),
             ) {
                 Icon(
-                    Icons.Outlined.Stop,
+                    Icons.Outlined.Refresh,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(14.dp),
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    "Stop",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    "Restart",
+                    style = MaterialTheme.typography.labelMedium,
                 )
             }
         }

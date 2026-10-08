@@ -447,24 +447,33 @@ private fun NoGitRepository(gitViewModel: GitViewModel) {
             Icon(
                 painter = painterResource(drawables.git),
                 contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                modifier = Modifier.size(52.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
             )
             Text(
                 "No git repository",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                "Open a project with a .git directory",
+                if (root != null) "Directory: ${root.name}" else "Open a project folder to manage Git",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
             if (hasGitDir) {
-                Button(onClick = { gitViewModel.loadRepository(root!!.absolutePath) },
+                Button(
+                    onClick = { gitViewModel.loadRepository(root.absolutePath) },
                     shape = MaterialTheme.shapes.medium,
                 ) {
                     Text("Load repository")
+                }
+            } else if (root != null) {
+                Button(
+                    onClick = { gitViewModel.initRepository(root) },
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Text("Initialize repository")
                 }
             }
         }

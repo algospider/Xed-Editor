@@ -18,6 +18,7 @@ import com.rk.ai.service.IdeService
 import com.rk.ai.service.IdeServiceImpl
 import com.rk.file.child
 import com.rk.file.localBinDir
+import com.rk.file.sandboxHomeDir
 import com.rk.settings.Settings
 import com.rk.terminal.setupTerminalFiles
 import com.rk.utils.getTempDir
@@ -218,16 +219,24 @@ object AiSessionManager {
         extraArgs: List<String> = emptyList(),
     ): TerminalSession {
         setupTerminalFiles()
+        val hostCwd = when {
+            workingDir == "/home" -> sandboxHomeDir().absolutePath
+            workingDir.startsWith("/home/") -> File(sandboxHomeDir(), workingDir.removePrefix("/home/")).let {
+                if (it.exists() && it.isDirectory) it.absolutePath else sandboxHomeDir().absolutePath
+            }
+            workingDir.isNotBlank() && File(workingDir).exists() && File(workingDir).isDirectory -> workingDir
+            else -> sandboxHomeDir().absolutePath
+        }
         val tmpDir = File(getTempDir(), "terminal/${agent.name}-sheet").apply { mkdirs() }
-        val xedDir = if (workingDir.isNotBlank() && File(workingDir).exists()) {
-            File(workingDir, ".xed").also { it.mkdirs() }
+        val xedDir = if (hostCwd.isNotBlank() && File(hostCwd).exists()) {
+            File(hostCwd, ".xed").also { it.mkdirs() }
         } else null
         AgentEnvironmentBuilder.writeBridgeEnvFile(tmpDir, xedDir, bridge)
-        val (shell, args) = agentSheetProcessArgs(agent, extraArgs, xedDir, workingDir)
+        val (shell, args) = agentSheetProcessArgs(agent, extraArgs, xedDir, hostCwd)
         val env = AgentEnvironmentBuilder.buildEnv(
             AgentEnvironmentConfig(
                 activity = activity,
-                workingDir = workingDir,
+                workingDir = hostCwd,
                 bridge = bridge,
                 agent = agent,
                 tmpSubdir = "${agent.name}-sheet",
@@ -235,7 +244,7 @@ object AiSessionManager {
         )
         return TerminalSession(
             shell,
-            workingDir,
+            hostCwd,
             args,
             env,
             Settings.terminal_scrollback_buffer,
