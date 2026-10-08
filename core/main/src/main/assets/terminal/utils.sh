@@ -20,6 +20,12 @@ error() {
   printf "\n${RED_BG} ERROR ${RESET} ${BOLD_RED}%s${RESET}\n" "$1"
 }
 
+log() {
+  printf '%s\n' "$*" >&2
+}
+
+export UV_THREADPOOL_SIZE=1
+
 ask() {
   local prompt="$1"
   local response
@@ -50,9 +56,14 @@ ensure_node() {
 
 install_nodejs() {
   info "Installing Node.js LTS..."
-  apt install -y curl ca-certificates
-  curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
-  apt install -y nodejs
+  export UV_THREADPOOL_SIZE=1
+  apt-get update -y || true
+  apt-get install -y curl ca-certificates || true
+  if curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && apt-get install -y nodejs; then
+    return 0
+  fi
+  warn "NodeSource setup failed, falling back to Ubuntu repository..."
+  apt-get install -y nodejs npm
 }
 
 uninstall_nodejs() {

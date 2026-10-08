@@ -10,6 +10,7 @@ import com.rk.file.child
 import com.rk.file.localBinDir
 import com.rk.file.localDir
 import com.rk.file.localLibDir
+import com.rk.file.sandboxDir
 import com.rk.file.sandboxHomeDir
 import com.rk.settings.Settings
 import com.rk.tabs.editor.EditorTab
@@ -18,6 +19,7 @@ import com.rk.utils.getTempDir
 import com.rk.utils.isFDroid
 import com.rk.terminal.NEXT_STAGE
 import com.rk.terminal.getNextStage
+import com.rk.terminal.rootfsUrl
 import com.rk.terminal.setupTerminalFiles
 import com.rk.xededitor.BuildConfig
 import com.termux.terminal.TerminalSession
@@ -80,6 +82,7 @@ object MkSession {
                 "SANDBOX=${Settings.sandbox}",
                 "TMP_DIR=${getTempDir()}",
                 "TMPDIR=${getTempDir()}",
+                "ROOTFS_URL=${rootfsUrl()}",
                 "TZ=UTC",
                 "DOTNET_GCHeapHardLimit=1C0000000",
                 "SOURCE_DIR=${activity.applicationInfo.sourceDir}",
@@ -92,18 +95,26 @@ object MkSession {
             )
 
         if (!isFDroid) {
-            env.add("PROOT_LOADER=${activity.applicationInfo.nativeLibraryDir}/libproot-loader.so")
+            val nativeLibDir = File(activity.applicationInfo.nativeLibraryDir)
+            if (nativeLibDir.child("libproot-loader.so").exists()) {
+                env.add("PROOT_LOADER=${nativeLibDir.child("libproot-loader.so").absolutePath}")
+            }
             if (
                 Build.SUPPORTED_32_BIT_ABIS.isNotEmpty() &&
-                    File(activity.applicationInfo.nativeLibraryDir).child("libproot-loader32.so").exists()
+                    nativeLibDir.child("libproot-loader32.so").exists()
             ) {
-                env.add("PROOT_LOADER32=${activity.applicationInfo.nativeLibraryDir}/libproot-loader32.so")
+                env.add("PROOT_LOADER32=${nativeLibDir.child("libproot-loader32.so").absolutePath}")
             }
         }
 
-        if (Settings.seccomp) {
-            env.add("SECCOMP=1")
-        }
+        // Forced: proot seccomp acceleration breaks on Samsung/Android 15+
+        // kernels (execve/openat2 ENOSYS). Pure-ptrace is slower but works.
+        env.add("PROOT_NO_SECCOMP=1")
+        env.add("PROOT_ASSUME_NEW_SECCOMP=1")
+        env.add("PROOT_F2FS_WORKAROUND=1")
+        val l2sDir = sandboxDir().child(".l2s")
+        l2sDir.mkdirs()
+        env.add("PROOT_L2S_DIR=${l2sDir.absolutePath}")
 
         env.addAll(envVariables.map { "${it.key}=${it.value}" })
 
@@ -136,14 +147,20 @@ object MkSession {
         }
 
         val actualShell: String
-        val actualArgs: Array<String> =
-            if (getNextStage(activity) == NEXT_STAGE.EXTRACTION) {
-                actualShell = "/system/bin/sh"
-                (listOf("-c", setupSH.absolutePath) + args).toTypedArray()
+        val actualArgs: Array<String>
+        if (getNextStage(activity) == NEXT_STAGE.EXTRACTION) {
+            actualShell = "/system/bin/sh"
+            actualArgs = (listOf("/system/bin/sh", setupSH.absolutePath) + args).toTypedArray()
+        } else {
+            actualShell = shell
+            actualArgs = if (shell == "/system/bin/sh" && args.isNotEmpty()) {
+                (listOf("/system/bin/sh") + args).toTypedArray()
+            } else if (args.isEmpty()) {
+                arrayOf(shell)
             } else {
-                actualShell = shell
-                (listOf("-c") + args).toTypedArray()
+                (listOf(shell) + args).toTypedArray()
             }
+        }
 
         pendingCommand = null
 

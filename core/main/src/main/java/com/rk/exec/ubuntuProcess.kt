@@ -107,6 +107,14 @@ suspend fun ubuntuProcess(
 
                 bind(tmpDir.absolutePath)
 
+                // libgcrypt aborts when /proc/sys/crypto/fips_enabled is unreadable
+                // (missing on Samsung kernels + proot filter quirks). Stub it as "0".
+                val fipsStub = localDir().child("fips_enabled")
+                try {
+                    if (!fipsStub.exists()) fipsStub.writeText("0\n")
+                    bind("${fipsStub.absolutePath}:/proc/sys/crypto/fips_enabled")
+                } catch (_: Exception) {}
+
                 add("-0")
                 add("--link2symlink")
                 add("--sysvipc")
@@ -171,8 +179,11 @@ suspend fun ubuntuProcess(
             env["DEX2OATBOOTCLASSPATH"] = System.getenv("DEX2OATBOOTCLASSPATH").orEmpty()
             env["EXTERNAL_STORAGE"] = System.getenv("EXTERNAL_STORAGE").orEmpty()
 
+            // Debian-standard order: /usr/local/bin first so the dpkg/apt
+            // fixup wrappers (installed by init.sh) shadow the real tools;
+            // host Android dirs appended last as a fallback only.
             env["PATH"] =
-                "/bin:/sbin:/usr/bin:/usr/sbin:/usr/games:/usr/local/bin:/usr/local/sbin:${localBinDir()}:${System.getenv("PATH")}"
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:${localBinDir()}:${System.getenv("PATH")}"
 
             if (!isFDroid && app != null) {
                 val nativeLibDir = app.applicationInfo.nativeLibraryDir
@@ -185,9 +196,14 @@ suspend fun ubuntuProcess(
                 }
             }
 
-            if (Settings.seccomp) {
-                env["SECCOMP"] = "1"
-            }
+            // Forced: proot seccomp acceleration breaks on Samsung/Android 15+
+            // kernels (execve/openat2 ENOSYS). Pure-ptrace is slower but works.
+            env["PROOT_NO_SECCOMP"] = "1"
+            env["PROOT_ASSUME_NEW_SECCOMP"] = "1"
+            env["PROOT_F2FS_WORKAROUND"] = "1"
+            val l2sDir = sandboxDir().child(".l2s")
+            l2sDir.mkdirs()
+            env["PROOT_L2S_DIR"] = l2sDir.absolutePath
         }
 
         return@withContext processBuilder.start()

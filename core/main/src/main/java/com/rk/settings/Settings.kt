@@ -66,7 +66,7 @@ object Settings {
     var terminal_cursor_style by CachedPreference("terminal_cursor_style", "block")
     var terminal_extra_keys by CachedPreference("terminal_extra_keys", DEFAULT_TERMINAL_EXTRA_KEYS)
     var terminal_virus_notice by CachedPreference("terminal_virus_notice", false)
-    var seccomp by CachedPreference("seccomp", false)
+    var seccomp by CachedPreference("seccomp", true)
     var desktop_mode by CachedPreference("desktop_mode", false)
     var sandbox by CachedPreference("sandbox", true)
     var terminate_sessions_on_exit by CachedPreference("terminate_sessions_on_exit", false)

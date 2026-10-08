@@ -19,20 +19,31 @@ cd "$target_dir" 2>/dev/null || cd "$workspace_dir" 2>/dev/null || cd "$HOME"
 export WKDIR="$(pwd)"
 
 export NO_UPDATE_NOTIFIER=1
-export PATH="$LOCAL/bin:$PATH"
+export PATH="/usr/local/bin:/usr/bin:$HOME/.local/bin:$LOCAL/bin:$PATH"
 export EDITOR=vim
 export VISUAL=vim
-
-info() { log "[INFO] $*"; }
-warn() { log "[WARN] $*"; }
-
-AGY_BIN="$LOCAL/bin/agy"
 
 info "Starting Antigravity CLI..."
 info "Workspace: $WKDIR"
 
 # Configure the Xed Editor IDE bridge as an MCP server
 configure_xed_mcp antigravity "$IDE_PORT" "$IDE_TOKEN"
+
+find_agy_bin() {
+  if command_exists agy; then
+    command -v agy
+  elif [ -x "$LOCAL/bin/agy" ]; then
+    echo "$LOCAL/bin/agy"
+  elif [ -x "$HOME/.local/bin/agy" ]; then
+    echo "$HOME/.local/bin/agy"
+  elif [ -x "/usr/bin/agy" ]; then
+    echo "/usr/bin/agy"
+  elif [ -x "/usr/local/bin/agy" ]; then
+    echo "/usr/local/bin/agy"
+  fi
+}
+
+AGY_BIN="$(find_agy_bin)"
 
 # --- Install agy binary if not present via official installer ---
 install_agy() {
@@ -53,26 +64,33 @@ install_agy() {
   }
 
   info "Running official installer..."
-  bash "$installer_sh" --dir "$LOCAL/bin" 2>&1 || {
+  bash "$installer_sh" --dir /usr/bin 2>&1 || \
+  bash "$installer_sh" --dir "$LOCAL/bin" 2>&1 || \
+  bash "$installer_sh" 2>&1 || {
     warn "Official installation failed"
     return 1
   }
 
-  if [ -x "$AGY_BIN" ]; then
-    info "Antigravity CLI installed successfully"
+  AGY_BIN="$(find_agy_bin)"
+  if [ -n "$AGY_BIN" ] && [ -x "$AGY_BIN" ]; then
+    info "Antigravity CLI installed successfully at $AGY_BIN"
+    if [ "$AGY_BIN" != "/usr/bin/agy" ] && [ -w /usr/bin ] && [ ! -e /usr/bin/agy ]; then
+      ln -sf "$AGY_BIN" /usr/bin/agy 2>/dev/null || true
+    fi
   else
-    warn "Binary not found at $AGY_BIN after installation"
+    warn "Binary not found after installation"
     return 1
   fi
 }
 
 # Install if missing
-if [ ! -x "$AGY_BIN" ]; then
+if [ -z "$AGY_BIN" ] || [ ! -x "$AGY_BIN" ]; then
   install_agy || warn "Installation failed — Antigravity CLI will be unavailable"
 fi
 
 # Launch
-if [ -x "$AGY_BIN" ]; then
+AGY_BIN="$(find_agy_bin)"
+if [ -n "$AGY_BIN" ] && [ -x "$AGY_BIN" ]; then
   info "Starting Antigravity CLI in $(pwd)"
   exec "$AGY_BIN" "$@"
 else

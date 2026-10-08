@@ -439,7 +439,7 @@ private fun StatusBar(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
                                             when {
-                                                a.cliBinaryName == "gemini" -> Icons.Outlined.Psychology
+                                                a.name == "gemini" -> Icons.Outlined.Psychology
                                                 a.name == "codex" -> Icons.Outlined.Terminal
                                                 a.name == "antigravity" -> Icons.Outlined.Launch
                                                 else -> Icons.Outlined.AutoFixHigh

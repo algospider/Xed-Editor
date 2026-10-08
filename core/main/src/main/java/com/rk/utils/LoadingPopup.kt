@@ -67,8 +67,12 @@ class LoadingPopup(private val activity: AppCompatActivity?, hideAfterMillis: Lo
 
     fun setMessage(message: String): LoadingPopup {
         this.message = message
-        if (dialog?.isShowing == true) {
-            dialog?.setView(createComposeView())
+        // May be called from IO threads (e.g. download progress) — view
+        // updates must happen on the UI thread.
+        activity?.runOnUiThread {
+            if (dialog?.isShowing == true) {
+                dialog?.setView(createComposeView())
+            }
         }
         return this
     }

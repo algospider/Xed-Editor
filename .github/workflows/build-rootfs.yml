@@ -1,0 +1,95 @@
+name: Build Ubuntu Rootfs
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., ubuntu-24.04-dev-20250115)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build rootfs for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            artifact: ubuntu-base-24.04.3-dev-amd64.tar.gz
+          - arch: arm64
+            platform: linux/arm64
+            artifact: ubuntu-base-24.04.3-dev-arm64.tar.gz
+          - arch: armhf
+            platform: linux/arm/v7
+            artifact: ubuntu-base-24.04.3-dev-armhf.tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build rootfs image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./scripts/Dockerfile.rootfs
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: botix-rootfs:${{ matrix.arch }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export rootfs tarball
+        run: |
+          CID=$(docker create --platform ${{ matrix.platform }} botix-rootfs:${{ matrix.arch }})
+          docker export $CID | gzip > ${{ matrix.artifact }}
+          docker rm $CID
+          echo "Created ${{ matrix.artifact }} ($(du -h ${{ matrix.artifact }} | cut -f1))"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-${{ matrix.arch }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: List artifacts
+        run: ls -lh ./artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: Ubuntu 24.04 Dev Rootfs
+          body: |
+            Pre-built Ubuntu 24.04 rootfs with development tools for Botix terminal.
+            
+            **Included packages:**
+            - Build tools: build-essential, cmake, pkg-config, libssl-dev
+            - Version control: git, git-lfs
+            - Languages: python3, python3-pip, nodejs, npm
+            - Utilities: curl, wget, jq, tree, htop, vim, nano, tmux, screen
+            - Modern CLI tools: ripgrep, fd-find, bat, eza
+          files: |
+            ./artifacts/rootfs-amd64/ubuntu-base-24.04.3-dev-amd64.tar.gz
+            ./artifacts/rootfs-arm64/ubuntu-base-24.04.3-dev-arm64.tar.gz
+            ./artifacts/rootfs-armhf/ubuntu-base-24.04.3-dev-armhf.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

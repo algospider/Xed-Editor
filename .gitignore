@@ -34,3 +34,5 @@ app/xed.keystore
 /core/vibe_coding/help_resources/claude-code-main
 
 /core/vibe-coding/help_resources
+signing.properties
+gradle/gradle-daemon-jvm.properties

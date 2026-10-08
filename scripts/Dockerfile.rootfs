@@ -1,0 +1,84 @@
+# Dockerfile for building Botix Ubuntu rootfs with dev tools pre-installed
+# Used by .github/workflows/build-rootfs.yml
+
+FROM ubuntu:24.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install all development packages in one layer for smaller image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core build tools
+    build-essential \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    libffi-dev \
+    # Version control
+    git \
+    git-lfs \
+    # Network/download
+    curl \
+    wget \
+    rsync \
+    ca-certificates \
+    # Python (AI/ML focus)
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    python3-full \
+    # Node.js (for agents/tools)
+    nodejs \
+    npm \
+    # Utilities
+    jq \
+    tree \
+    htop \
+    vim \
+    nano \
+    unzip \
+    zip \
+    tar \
+    gzip \
+    bzip2 \
+    xz-utils \
+    # Terminal multiplexer
+    tmux \
+    screen \
+    # Shell enhancements
+    zsh \
+    fish \
+    command-not-found \
+    sudo \
+    xkb-data \
+    # Process/tools
+    procps \
+    lsof \
+    strace \
+    ltrace \
+    # Compression
+    p7zip-full \
+    p7zip-rar \
+    # Modern CLI tools
+    ripgrep \
+    fd-find \
+    bat \
+    eza \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user (UID 1000 matches typical Android app)
+RUN useradd -m -u 1000 -s /bin/bash botix \
+    && echo "botix ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/botix
+
+# Set up locale
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+# Create working directory
+WORKDIR /home/botix
+
+# Default shell
+SHELL ["/bin/bash", "-c"]

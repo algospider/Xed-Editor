@@ -86,7 +86,7 @@ fun rememberToolSheetState(
     return state
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ToolSheetContainer(
     onDismissRequest: () -> Unit,
@@ -117,6 +117,17 @@ fun ToolSheetContainer(
         initialHeight = initialHeight,
         maxHeight = maxHeight,
     )
+
+    // When the keyboard closes, the sheet stays shrunk at the clamped height
+    // forever (bounds grew but heightPx never restores). Snap back to the
+    // default open height so one keyboard cycle doesn't permanently shrink it.
+    val imeVisible = WindowInsets.isImeVisible
+    val restoreDensity = LocalDensity.current
+    LaunchedEffect(imeVisible) {
+        if (!imeVisible) {
+            state.snapTo(initialHeight.value * restoreDensity.density)
+        }
+    }
 
     ToolSheetContent(
         state = state,

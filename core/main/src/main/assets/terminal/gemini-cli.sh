@@ -16,7 +16,8 @@ export WKDIR="$(pwd)"
 export NO_UPDATE_NOTIFIER=1
 export GEMINI_TELEMETRY_ENABLED=false
 export GEMINI_TELEMETRY_TARGET=local
-export PATH="$LOCAL/bin:$PATH"
+export UV_THREADPOOL_SIZE=1
+export PATH="/usr/local/bin:/usr/bin:$HOME/.local/bin:$LOCAL/bin:$PATH"
 export EDITOR=vim
 export VISUAL=vim
 configure_gemini_auth_browser

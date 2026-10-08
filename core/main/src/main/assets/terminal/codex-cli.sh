@@ -18,25 +18,40 @@ cd "$target_dir" 2>/dev/null || cd "$workspace_dir" 2>/dev/null || cd "$HOME"
 export WKDIR="$(pwd)"
 
 export NO_UPDATE_NOTIFIER=1
-export PATH="$LOCAL/bin:$PATH"
+export UV_THREADPOOL_SIZE=1
+export PATH="/usr/local/bin:/usr/bin:$HOME/.local/bin:$LOCAL/bin:$PATH"
 export EDITOR=vim
 export VISUAL=vim
-
-info() { log "[INFO] $*"; }
-warn() { log "[WARN] $*"; }
 
 info "Starting Codex CLI..."
 info "Workspace: $WKDIR"
 
 ensure_node
 
-if ! command -v codex >/dev/null 2>&1; then
-  info "Installing Codex CLI..."
-  npm install -g @openai/codex
-fi
+ensure_codex() {
+  if ! command_exists codex && [ ! -x "$LOCAL/bin/codex" ]; then
+    info "Installing Codex CLI..."
+    npm install -g --prefix /usr @openai/codex 2>&1 || \
+    npm install -g --prefix "$LOCAL" @openai/codex 2>&1 || {
+      warn "Codex CLI installation failed"
+      return 1
+    }
+    info "Codex CLI installed successfully."
+  fi
+}
+
+ensure_codex
 
 # Configure the Xed Editor IDE bridge as an MCP server
 configure_xed_mcp codex "$IDE_PORT" "$IDE_TOKEN"
 
+CODEX_BIN="$(command -v codex 2>/dev/null || true)"
+if [ -z "$CODEX_BIN" ] && [ -x "$LOCAL/bin/codex" ]; then
+  CODEX_BIN="$LOCAL/bin/codex"
+fi
+if [ -z "$CODEX_BIN" ]; then
+  CODEX_BIN="codex"
+fi
+
 info "Starting Codex CLI in $(pwd)"
-exec codex "$@"
+exec "$CODEX_BIN" "$@"

@@ -388,14 +388,31 @@ fun TerminalView.applyTerminalSettings(context: Context) {
     }
 }
 
-fun TerminalView.focusAndShowKeyboard(terminalViewModel: TerminalViewModel) {
+fun TerminalView.focusAndShowKeyboard(terminalViewModel: TerminalViewModel, retries: Int = 3) {
     post {
         isFocusable = true
         isFocusableInTouchMode = true
-        requestFocus()
-        val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-        imm?.restartInput(this)
-        imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+        if (!isFocused) requestFocus()
+        // Modern path first: WindowInsetsController. Legacy showSoftInput
+        // often logs "not served" when the view isn't attached yet.
+        val shown = try {
+            if (isAttachedToWindow && hasWindowFocus()) {
+                androidx.core.view.ViewCompat.getWindowInsetsController(this)
+                    ?.show(androidx.core.view.WindowInsetsCompat.Type.ime())
+                true
+            } else false
+        } catch (_: Exception) { false }
+        if (!shown) {
+            try {
+                val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                imm?.restartInput(this)
+                imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+            } catch (_: Exception) {}
+            // Retry once attached/served — fixes tap-to-focus missing keyboard
+            if (!isAttachedToWindow && retries > 0) {
+                postDelayed({ focusAndShowKeyboard(terminalViewModel, retries - 1) }, 150)
+            }
+        }
     }
 }
 

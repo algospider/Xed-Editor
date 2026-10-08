@@ -14,12 +14,10 @@ cd "$target_dir" 2>/dev/null || cd "$workspace_dir" 2>/dev/null || cd "$HOME"
 export WKDIR="$(pwd)"
 
 export NO_UPDATE_NOTIFIER=1
-export PATH="$LOCAL/bin:$PATH"
+export UV_THREADPOOL_SIZE=1
+export PATH="/usr/local/bin:/usr/bin:$HOME/.local/bin:$LOCAL/bin:$PATH"
 export EDITOR=vim
 export VISUAL=vim
-
-info() { log "[INFO] $*"; }
-warn() { log "[WARN] $*"; }
 
 info "Starting OpenCode CLI..."
 info "Workspace: $WKDIR"
@@ -35,12 +33,20 @@ ensure_node() {
 }
 
 ensure_opencode() {
-  if [ ! -x "$LOCAL/bin/opencode" ]; then
+  if ! command_exists opencode && [ ! -x "$LOCAL/bin/opencode" ]; then
     info "Installing OpenCode CLI..."
-    npm install -g --prefix "$LOCAL" opencode-ai@latest 2>&1 || {
+    npm install -g --prefix /usr --allow-scripts=opencode-ai opencode-ai@latest 2>&1 || \
+    npm install -g --prefix "$LOCAL" --allow-scripts=opencode-ai opencode-ai@latest 2>&1 || {
       warn "OpenCode CLI installation failed"
       return 1
     }
+    if ! command_exists opencode && [ ! -x "$LOCAL/bin/opencode" ]; then
+      for postinstall in /usr/lib/node_modules/opencode-ai/postinstall.mjs "$LOCAL/lib/node_modules/opencode-ai/postinstall.mjs"; do
+        if [ -f "$postinstall" ]; then
+          node "$postinstall" 2>&1 || true
+        fi
+      done
+    fi
     info "OpenCode CLI installed successfully."
   fi
 }
@@ -48,8 +54,11 @@ ensure_opencode() {
 ensure_node
 ensure_opencode
 
-OPENCODE_BIN="$LOCAL/bin/opencode"
-if [ ! -x "$OPENCODE_BIN" ]; then
+OPENCODE_BIN="$(command -v opencode 2>/dev/null || true)"
+if [ -z "$OPENCODE_BIN" ] && [ -x "$LOCAL/bin/opencode" ]; then
+  OPENCODE_BIN="$LOCAL/bin/opencode"
+fi
+if [ -z "$OPENCODE_BIN" ]; then
   OPENCODE_BIN="opencode"
 fi
 

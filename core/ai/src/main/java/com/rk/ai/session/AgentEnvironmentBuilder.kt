@@ -10,6 +10,7 @@ import com.rk.file.child
 import com.rk.file.localBinDir
 import com.rk.file.localDir
 import com.rk.file.localLibDir
+import com.rk.file.sandboxDir
 import com.rk.file.sandboxHomeDir
 import com.rk.settings.Settings
 import com.rk.utils.getTempDir
@@ -106,13 +107,20 @@ object AgentEnvironmentBuilder {
         ).apply {
             addAll(config.agent.buildEnv(emptyMap()).map { "${it.key}=${it.value}" })
             addAll(config.extraEnv.map { "${it.key}=${it.value}" })
-            if (!isFDroid && localLibDir().child("libproot-loader.so").exists()) {
-                add("PROOT_LOADER=${activity.applicationInfo.nativeLibraryDir}/libproot-loader.so")
-                if (Build.SUPPORTED_32_BIT_ABIS.isNotEmpty() && File(activity.applicationInfo.nativeLibraryDir).child("libproot-loader32.so").exists()) {
-                    add("PROOT_LOADER32=${activity.applicationInfo.nativeLibraryDir}/libproot-loader32.so")
+            val nativeLibDir = File(activity.applicationInfo.nativeLibraryDir)
+            if (!isFDroid && nativeLibDir.child("libproot-loader.so").exists()) {
+                add("PROOT_LOADER=${nativeLibDir.child("libproot-loader.so").absolutePath}")
+                if (Build.SUPPORTED_32_BIT_ABIS.isNotEmpty() && nativeLibDir.child("libproot-loader32.so").exists()) {
+                    add("PROOT_LOADER32=${nativeLibDir.child("libproot-loader32.so").absolutePath}")
                 }
             }
-            if (Settings.seccomp) add("SECCOMP=1")
+            // Forced: proot seccomp acceleration breaks on Samsung/Android 15+ kernels
+            add("PROOT_NO_SECCOMP=1")
+            add("PROOT_ASSUME_NEW_SECCOMP=1")
+            add("PROOT_F2FS_WORKAROUND=1")
+            val l2sDir = sandboxDir().child(".l2s")
+            l2sDir.mkdirs()
+            add("PROOT_L2S_DIR=${l2sDir.absolutePath}")
         }.toTypedArray()
     }
 

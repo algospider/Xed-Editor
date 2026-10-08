@@ -16,12 +16,16 @@ export WKDIR="$(pwd)"
 export GEMINI_TELEMETRY_ENABLED=false
 export GEMINI_TELEMETRY_TARGET=local
 export NO_UPDATE_NOTIFIER=1
-export PATH="$LOCAL/bin:$PATH"
+export UV_THREADPOOL_SIZE=1
+export PATH="/usr/local/bin:/usr/bin:$HOME/.local/bin:$LOCAL/bin:$PATH"
 export EDITOR=vim
 export VISUAL=vim
 configure_gemini_auth_browser
 
 log() { printf '%s\n' "$*" >&2; }
+info() { log "[INFO] $*"; }
+warn() { log "[WARN] $*"; }
+error() { log "[ERROR] $*"; }
 
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   log "Node.js/npm is required. Installing Node.js LTS..."
