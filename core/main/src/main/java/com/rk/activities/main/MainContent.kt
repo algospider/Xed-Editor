@@ -179,11 +179,12 @@ fun MainContent(
             visible = mainViewModel.showBottomPanel,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier.fillMaxSize()
         ) {
             UnifiedToolSheet(
                 viewModel = mainViewModel,
-                onDismissRequest = { mainViewModel.showBottomPanel = false }
+                onDismissRequest = { mainViewModel.showBottomPanel = false },
+                modifier = Modifier.fillMaxSize(),
             )
         }
 

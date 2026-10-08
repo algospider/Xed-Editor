@@ -99,254 +99,69 @@ fun ToolSheetContainer(
     bottomBar: (@Composable () -> Unit)? = null,
     content: (@Composable () -> Unit)? = null,
 ) {
-    val density = LocalDensity.current
-    val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
-    val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
-    val imeHeightDp = with(density) { WindowInsets.ime.getBottom(density).toDp() }
-    val statusBarHeightDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
     val imeVisible = WindowInsets.isImeVisible
-
-    val isTablet = screenWidthDp >= 600.dp
-
-    val availableHeight = (screenHeightDp - imeHeightDp - statusBarHeightDp).coerceAtLeast(200.dp)
-    val maxHeight = if (imeVisible && !isTablet) {
-        (availableHeight - 8.dp).coerceAtLeast(240.dp)
-    } else {
-        (availableHeight * if (isTablet) 0.88f else 0.90f).coerceAtLeast(280.dp)
-    }
-    val minHeight = if (imeVisible && !isTablet) {
-        maxHeight
-    } else {
-        DesignTokens.BottomSheet.minSheetHeight.coerceAtMost(maxHeight)
-    }
-    val initialHeight = if (imeVisible && !isTablet) {
-        maxHeight
-    } else {
-        (availableHeight * if (isTablet) 0.60f else 0.52f).coerceIn(minHeight, maxHeight)
-    }
-
-    val state = rememberToolSheetState(
-        minHeight = minHeight,
-        initialHeight = initialHeight,
-        maxHeight = maxHeight,
-    )
-
-    LaunchedEffect(imeVisible) {
-        if (imeVisible && !isTablet) {
-            state.snapTo(maxHeight.value * density.density)
-        } else {
-            state.snapTo(initialHeight.value * density.density)
-        }
-    }
-
-    ToolSheetContent(
-        state = state,
-        onDismissRequest = onDismissRequest,
-        session = session,
-        modifier = modifier,
-        showTerminal = showTerminal,
-        isTablet = isTablet,
-        imeVisible = imeVisible,
-        headerContent = headerContent,
-        controls = controls,
-        bottomBar = bottomBar,
-        content = content,
-    )
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun ToolSheetModalContainer(
-    onDismissRequest: () -> Unit,
-    cwd: String,
-    session: TerminalSession?,
-    modifier: Modifier = Modifier,
-    showTerminal: Boolean = true,
-    headerContent: (@Composable () -> Unit)? = null,
-    controls: (@Composable RowScope.() -> Unit)? = null,
-    bottomBar: (@Composable () -> Unit)? = null,
-    content: (@Composable () -> Unit)? = null,
-) {
-    val density = LocalDensity.current
-    val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
-    val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
-    val imeHeightDp = with(density) { WindowInsets.ime.getBottom(density).toDp() }
-    val statusBarHeightDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
-    val imeVisible = WindowInsets.isImeVisible
-
-    val isTablet = screenWidthDp >= 600.dp
-
-    val availableHeight = (screenHeightDp - imeHeightDp - statusBarHeightDp).coerceAtLeast(200.dp)
-    val maxHeight = if (imeVisible && !isTablet) {
-        (availableHeight - 8.dp).coerceAtLeast(240.dp)
-    } else {
-        (availableHeight * if (isTablet) 0.88f else 0.90f).coerceAtLeast(280.dp)
-    }
-    val minHeight = if (imeVisible && !isTablet) {
-        maxHeight
-    } else {
-        DesignTokens.BottomSheet.minSheetHeight.coerceAtMost(maxHeight)
-    }
-    val initialHeight = if (imeVisible && !isTablet) {
-        maxHeight
-    } else {
-        (availableHeight * if (isTablet) 0.60f else 0.52f).coerceIn(minHeight, maxHeight)
-    }
-
-    val state = rememberToolSheetState(
-        minHeight = minHeight,
-        initialHeight = initialHeight,
-        maxHeight = maxHeight,
-    )
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DesignTokens.BottomSheet.scrimColor)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onDismissRequest,
-            ),
-    ) {
-        ToolSheetContent(
-            state = state,
-            onDismissRequest = onDismissRequest,
-            session = session,
-            modifier = modifier,
-            showTerminal = showTerminal,
-            isTablet = isTablet,
-            imeVisible = imeVisible,
-            headerContent = headerContent,
-            controls = controls,
-            bottomBar = bottomBar,
-            content = content,
-        )
-    }
-}
-
-@Composable
-private fun ToolSheetContent(
-    state: ToolSheetState,
-    onDismissRequest: () -> Unit,
-    session: TerminalSession?,
-    modifier: Modifier = Modifier,
-    showTerminal: Boolean = true,
-    isTablet: Boolean = false,
-    imeVisible: Boolean = false,
-    headerContent: (@Composable () -> Unit)? = null,
-    controls: (@Composable RowScope.() -> Unit)? = null,
-    bottomBar: (@Composable () -> Unit)? = null,
-    content: (@Composable () -> Unit)? = null,
-) {
     val colorScheme = MaterialTheme.colorScheme
-
-    val shape = DesignTokens.BottomSheet.shape
-
-    var isDragging by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .height(state.heightDp)
+            .fillMaxSize()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = {},
             )
-            .shadow(
-                elevation = DesignTokens.BottomSheet.elevation,
-                shape = shape,
-                clip = true,
-            )
-            .background(colorScheme.surfaceContainer, shape = shape)
-            .border(
-                width = 0.5.dp,
-                color = colorScheme.outlineVariant.copy(alpha = 0.2f),
-                shape = shape,
-            ),
+            .background(colorScheme.surfaceContainer),
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .imePadding(),
         ) {
-            Column(
+            // Header: Stable 38dp height, pinned under status bar
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .draggable(
-                        orientation = Orientation.Vertical,
-                        enabled = !imeVisible,
-                        state = rememberDraggableState { delta ->
-                            state.snapTo(state.heightPx - delta)
-                        },
-                        onDragStarted = { isDragging = true },
-                        onDragStopped = { velocity ->
-                            isDragging = false
-                            val current = state.heightPx
-                            val midPx = (state.minHeightPx + state.maxHeightPx) / 2f
-                            if (velocity.absoluteValue > state.density.density * 2f) {
-                                state.snapTo(if (velocity < 0) state.maxHeightPx else state.minHeightPx)
-                            } else {
-                                state.snapTo(if (current < midPx) state.minHeightPx else state.maxHeightPx)
-                            }
-                        },
-                    )
-                    .background(colorScheme.surfaceContainer)
+                    .height(38.dp)
+                    .padding(start = 8.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (!imeVisible) {
-                    XedDragHandle(
-                        isDragging = isDragging,
-                        modifier = Modifier.clickable {
-                            val midPx = (state.minHeightPx + state.maxHeightPx) / 2f
-                            state.snapTo(if (state.heightPx < midPx) state.maxHeightPx else state.minHeightPx)
-                        },
-                    )
-                } else {
-                    Spacer(Modifier.height(4.dp))
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    headerContent?.invoke()
                 }
 
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(if (imeVisible) 34.dp else 40.dp)
-                        .padding(start = 8.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
                 ) {
-                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                        headerContent?.invoke()
-                    }
+                    controls?.invoke(this)
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.End,
+                    Spacer(Modifier.width(4.dp))
+
+                    FilledIconButton(
+                        onClick = onDismissRequest,
+                        modifier = Modifier.size(28.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            contentColor = colorScheme.onSurfaceVariant,
+                        ),
                     ) {
-                        controls?.invoke(this)
-
-                        Spacer(Modifier.width(4.dp))
-
-                        FilledIconButton(
-                            onClick = onDismissRequest,
-                            modifier = Modifier.size(28.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                contentColor = colorScheme.onSurfaceVariant,
-                            ),
-                        ) {
-                            XedIcon(
-                                com.rk.icons.Icon.DrawableRes(drawables.close),
-                                contentDescription = "Close",
-                                modifier = Modifier.size(13.dp),
-                                tint = colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        XedIcon(
+                            com.rk.icons.Icon.DrawableRes(drawables.close),
+                            contentDescription = "Close",
+                            modifier = Modifier.size(13.dp),
+                            tint = colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
-
-                HorizontalDivider(
-                    color = colorScheme.outlineVariant.copy(alpha = 0.15f),
-                    thickness = 0.5.dp,
-                )
             }
 
+            HorizontalDivider(
+                color = colorScheme.outlineVariant.copy(alpha = 0.15f),
+                thickness = 0.5.dp,
+            )
+
+            // Middle Content: Terminal or Panel Content
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -364,6 +179,7 @@ private fun ToolSheetContent(
                 }
             }
 
+            // Bottom Bar: Command Bar / Extra Keys
             bottomBar?.let {
                 HorizontalDivider(
                     color = colorScheme.outlineVariant.copy(alpha = 0.12f),
@@ -383,4 +199,30 @@ private fun ToolSheetContent(
             }
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun ToolSheetModalContainer(
+    onDismissRequest: () -> Unit,
+    cwd: String,
+    session: TerminalSession?,
+    modifier: Modifier = Modifier,
+    showTerminal: Boolean = true,
+    headerContent: (@Composable () -> Unit)? = null,
+    controls: (@Composable RowScope.() -> Unit)? = null,
+    bottomBar: (@Composable () -> Unit)? = null,
+    content: (@Composable () -> Unit)? = null,
+) {
+    ToolSheetContainer(
+        onDismissRequest = onDismissRequest,
+        cwd = cwd,
+        session = session,
+        modifier = modifier,
+        showTerminal = showTerminal,
+        headerContent = headerContent,
+        controls = controls,
+        bottomBar = bottomBar,
+        content = content,
+    )
 }

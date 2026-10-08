@@ -31,8 +31,6 @@ fun ToolSheetControls(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val isTablet = LocalConfiguration.current.screenWidthDp.dp >= 600.dp
-    val isImeVisible = WindowInsets.isImeVisible
-    val isCompactMobile = isImeVisible && !isTablet
 
     when (mode) {
         BottomPanelMode.AI -> {
@@ -40,7 +38,7 @@ fun ToolSheetControls(
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (!isCompactMobile) {
+                if (isTablet) {
                     FilledTonalIconButton(
                         onClick = onUndo,
                         enabled = canUndo,
@@ -138,7 +136,7 @@ fun ToolSheetControls(
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (!isCompactMobile) {
+                if (isTablet) {
                     FilledTonalIconButton(
                         onClick = onUndo,
                         enabled = canUndo,

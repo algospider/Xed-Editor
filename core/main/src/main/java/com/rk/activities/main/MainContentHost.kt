@@ -95,6 +95,16 @@ fun MainActivity.MainContentHost(
                 }
             }
 
+            LaunchedEffect(viewModel.showBottomPanel) {
+                if (viewModel.showBottomPanel) {
+                    viewModel.tabManager.currentTab?.let {
+                        if (it is EditorTab) {
+                            it.editorState.editor.get()?.clearFocus()
+                        }
+                    }
+                }
+            }
+
             LaunchedEffect(Settings.fullscreen) {
                 val controller = WindowCompat.getInsetsController(window, window.decorView)
                 if (Settings.fullscreen) {
@@ -107,8 +117,8 @@ fun MainActivity.MainContentHost(
             }
 
             val keyboardShown = WindowInsets.isImeVisible
-            LaunchedEffect(keyboardShown, Settings.smart_toolbar) {
-                viewModel.showTopBar = !Settings.smart_toolbar || !keyboardShown
+            LaunchedEffect(keyboardShown, Settings.smart_toolbar, viewModel.showBottomPanel) {
+                viewModel.showTopBar = !viewModel.showBottomPanel && (!Settings.smart_toolbar || !keyboardShown)
             }
 
             val scope = rememberCoroutineScope()
